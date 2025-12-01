@@ -1,0 +1,93 @@
+# config_tuned.toml
+# Tuned experiment config (keeps your baseline untouched by using new out_dir)
+# Goals:
+# - Detector: train longer + larger image size (better small tool detection)
+# - CVS: train longer + higher threshold to reduce false positives
+
+[paths]
+data_root = "C:/Users/TUF/COMP0220_Deep_Learning/coursework/endoscapes"
+runs_dir  = "runs"
+
+# -------------------------
+# Detector (Faster R-CNN)
+# -------------------------
+[detector.data]
+train_split = "train"
+val_split   = "val"
+test_split  = "test"
+ann_name    = "annotation_coco.json"
+
+[detector.train]
+epochs       = 40
+batch_size   = 2
+num_workers  = 4
+lr           = 0.005
+weight_decay = 0.0001
+momentum     = 0.9
+amp          = true
+freeze_backbone = false
+seed         = 42
+out_dir      = "runs/detector_tuned_e40_img800"
+
+[detector.model]
+# higher resolution tends to help small objects (tools)
+img_min_size = 800
+img_max_size = 1333
+
+# -------------------------
+# CVS Classifier
+# -------------------------
+[cvs.data]
+metadata_csv = "all_metadata.csv"
+train_split  = "train"
+val_split    = "val"
+filename_pattern = "{vid}_{frame}"
+keyframes_only   = true
+
+[cvs.train]
+epochs       = 40
+batch_size   = 32
+num_workers  = 4
+lr           = 0.0002
+weight_decay = 0.0001
+amp          = true
+freeze_backbone = false
+seed         = 42
+image_size   = 224
+out_dir      = "runs/cvs_tuned_e40_lr2e4_thr65"
+
+# -------------------------
+# Evaluate settings
+# -------------------------
+[eval.detector]
+split = "test"
+ckpt  = "runs/detector_tuned_e40_img800/detector_best.pth"
+meta  = "runs/detector_tuned_e40_img800/meta.json"
+ann_name    = "annotation_coco.json"
+batch_size  = 2
+num_workers = 4
+
+[eval.cvs]
+split = "test"
+ckpt  = "runs/cvs_tuned_e40_lr2e4_thr65/cvs_best.pth"
+meta  = "runs/cvs_tuned_e40_lr2e4_thr65/meta.json"
+batch_size  = 32
+num_workers = 4
+# Higher threshold → fewer false positives (usually higher precision, lower recall)
+threshold = 0.75
+
+[predict.detector]
+# which split/folder to read images from
+split = "test"
+ann_name = "annotation_coco.json"
+
+# if image is empty AND pick_annotated=false, script will error
+# you can set either full path OR just filename (e.g. "166_13700.jpg")
+image = ""   # example: "166_13700.jpg" or "C:/.../endoscapes/test/166_13700.jpg"
+
+# if true, it will randomly pick an image id that exists in COCO annotations
+pick_annotated = true
+
+# prediction display filtering
+score_thr = 0.75
+topk = 50

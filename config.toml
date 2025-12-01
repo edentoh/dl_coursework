@@ -1,0 +1,92 @@
+# config.toml
+
+[paths]
+data_root = "C:/Users/TUF/COMP0220_Deep_Learning/coursework/endoscapes"
+runs_dir  = "runs"
+
+# -------------------------
+# Detector (Faster R-CNN)
+# -------------------------
+[detector.data]
+train_split = "train"
+val_split   = "val"
+test_split  = "test"
+ann_name    = "annotation_coco.json"
+
+[detector.train]
+epochs      = 15
+batch_size  = 2
+num_workers = 4
+lr          = 0.01
+weight_decay = 0.0001
+momentum     = 0.9
+amp         = true
+freeze_backbone = false
+seed        = 42
+out_dir = "runs/detector_baseline2"
+
+[detector.model]
+img_min_size = 640
+img_max_size = 1024
+
+# -------------------------
+# CVS Classifier
+# -------------------------
+[cvs.data]
+metadata_csv = "all_metadata.csv"
+train_split  = "train"
+val_split    = "val"
+
+# filenames are built as: "{vid}_{frame}" + extension in folder
+filename_pattern = "{vid}_{frame}"
+keyframes_only   = true
+
+[cvs.train]
+epochs      = 15
+batch_size  = 32
+num_workers = 4
+lr          = 0.001
+weight_decay = 0.0001
+amp         = true
+freeze_backbone = false
+seed        = 42
+image_size  = 224
+out_dir = "runs/cvs_baseline2"
+
+# -------------------------
+# Evaluate settings (optional)
+# -------------------------
+[eval.detector]
+split = "test"
+ckpt = "runs/detector_baseline2/detector_best.pth"
+meta = "runs/detector_baseline2/meta.json"
+ann_name = "annotation_coco.json"
+batch_size = 2
+num_workers = 4
+
+[eval.cvs]
+split = "test"
+ckpt = "runs/cvs_baseline2/cvs_best.pth"
+meta = "runs/cvs_baseline2/meta.json"
+batch_size = 32
+num_workers = 4
+threshold = 0.75
+
+[predict.detector]
+# which split/folder to read images from
+split = "test"
+ann_name = "annotation_coco.json"
+
+# if image is empty AND pick_annotated=false, script will error
+# you can set either full path OR just filename (e.g. "166_13700.jpg")
+image = ""   # example: "166_13700.jpg" or "C:/.../endoscapes/test/166_13700.jpg"
+
+# if true, it will randomly pick an image id that exists in COCO annotations
+pick_annotated = true
+
+# prediction display filtering
+score_thr = 0.7
+topk = 50
+
+# optional: save GT and prediction figures
+save_dir = "runs/predict_vis"
