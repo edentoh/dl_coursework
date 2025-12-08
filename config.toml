@@ -58,16 +58,16 @@ out_dir = "runs/cvs_baseline2"
 # -------------------------
 [eval.detector]
 split = "test"
-ckpt = "runs/detector_baseline2/detector_best.pth"
-meta = "runs/detector_baseline2/meta.json"
+ckpt = "runs/detector_baseline/detector_best.pth"
+meta = "runs/detector_baseline/meta.json"
 ann_name = "annotation_coco.json"
 batch_size = 2
 num_workers = 4
 
 [eval.cvs]
 split = "test"
-ckpt = "runs/cvs_baseline2/cvs_best.pth"
-meta = "runs/cvs_baseline2/meta.json"
+ckpt = "runs/cvs_baseline/cvs_best.pth"
+meta = "runs/cvs_baseline/meta.json"
 batch_size = 32
 num_workers = 4
 threshold = 0.75

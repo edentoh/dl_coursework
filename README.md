@@ -1,12 +1,17 @@
-```md
-# Endoscapes2023 Coursework Pipeline (Detector + CVS)
+```markdown
+# Endoscapes2023 Coursework Pipeline (Baseline vs. Tuned)
 
-This repo trains **two models** on the Endoscapes dataset:
+This repo implements a comparative study on the Endoscapes dataset using two distinct modeling approaches:
 
-1) **Object Detection** (6 classes): Faster R-CNN (torchvision) trained on COCO-style bounding boxes.  
-2) **CVS Classification** (C1/C2/C3): ResNet-50 multi-label classifier trained from `all_metadata.csv` using `vid` + `frame`.
+### 1. Baseline Models (Control Group)
+* **Detector:** Faster R-CNN with **ResNet-50** backbone. Trained with constant LR.
+* **CVS Classifier:** **Single-Frame** ResNet-50 Classifier.
 
-Everything is configurable via `config.toml`.
+### 2. Tuned Models (Experimental Group)
+* **Detector:** Faster R-CNN with **ResNet-101** backbone + Learning Rate Scheduler + "Info" fix.
+* **CVS Classifier:** **Temporal Model** (CNN + LSTM) processing 5-frame video sequences with ResNet-101 backbone.
+
+Everything is configurable via `config.toml` (Baseline) and `config_tuned.toml` (Tuned).
 
 ---
 
@@ -17,33 +22,40 @@ Your Endoscapes root folder should look like this:
 ```
 
 endoscapes/
-all_metadata.csv
+all\_metadata.csv
 train/
-annotation_coco.json
-*.jpg
+annotation\_coco.json
+\*.jpg
 val/
-annotation_coco.json
-*.jpg
+annotation\_coco.json
+\*.jpg
 test/
-annotation_coco.json
-*.jpg
+annotation\_coco.json
+\*.jpg
 
 ````
-
-Notes:
-- The detector uses `train/annotation_coco.json`, `val/annotation_coco.json`, etc.
-- The CVS model uses `all_metadata.csv` which contains `vid`, `frame`, `C1`, `C2`, `C3`, and usually `is_ds_keyframe`.
 
 ---
 
 ## Files in this project
 
-- `config.toml` — central config (paths, epochs, batch sizes, ckpt/meta paths for evaluation)
-- `config_utils.py` — helper for reading TOML config
-- `train_detector.py` — train Faster R-CNN detector
-- `evaluate_detector.py` — evaluate detector and print COCO mAP
-- `train_cvs.py` — train CVS classifier (C1/C2/C3)
-- `evaluate_cvs.py` — evaluate CVS classifier
+**Configuration**
+* `config.toml` — Configuration for Baseline experiments.
+* `config_tuned.toml` — Configuration for Tuned experiments (ResNet-101, Temporal, Schedulers).
+* `config_utils.py` — Helper for reading TOML configs.
+
+**Training Scripts**
+* `train_detector.py` — Train Baseline Detector (ResNet-50).
+* `train_detector_tuned.py` — Train Tuned Detector (ResNet-101 + Scheduler).
+* `train_cvs.py` — Train Baseline CVS (Single Frame).
+* `train_cvs_tuned.py` — Train Tuned CVS (Temporal LSTM).
+
+**Evaluation & Visualization**
+* `evaluate_detector.py` — Evaluate Baseline Detector (mAP).
+* `evaluate_detector_tuned.py` — Evaluate Tuned Detector (ResNet-101 support).
+* `evaluate_cvs.py` — Evaluate Baseline CVS.
+* `evaluate_cvs_tuned.py` — Evaluate Tuned CVS (Sequence support).
+* `predict_detector_one.py` — Visualize predictions (Box + CVS) vs. Ground Truth for a single image.
 
 ---
 
@@ -57,8 +69,11 @@ python -m venv endoscapes_venv
 python -m pip install --upgrade pip
 ````
 
+**Important:** Install the **GPU (CUDA)** version of PyTorch. Do **not** use the CPU version.
+
 ```powershell
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# Example for CUDA 12.1 (Adjust if you have a different CUDA version)
+pip install torch torchvision --index-url [https://download.pytorch.org/whl/cu121](https://download.pytorch.org/whl/cu121)
 ```
 
 Install remaining dependencies:
@@ -67,208 +82,96 @@ Install remaining dependencies:
 pip install numpy pandas pillow matplotlib pycocotools
 ```
 
----
+-----
 
-## 1) Configure `config.toml`
+## 1\) Train the Models
 
-Example important keys:
-
-```toml
-[paths]
-data_root = "C:/Users/TUF/COMP0220_Deep_Learning/coursework/endoscapes"
-
-[detector.train]
-epochs = 40
-batch_size = 2
-num_workers = 4
-out_dir = "runs/detector"
-
-[cvs.train]
-epochs = 20
-batch_size = 32
-num_workers = 4
-out_dir = "runs/cvs"
-
-[eval.detector]
-split = "test"
-ckpt  = "runs/detector/detector_best.pth"
-meta  = "runs/detector/meta.json"
-
-[eval.cvs]
-split = "test"
-ckpt  = "runs/cvs/cvs_best.pth"
-meta  = "runs/cvs/meta.json"
-```
-
-Important:
-
-* Use forward slashes in Windows paths inside TOML: `C:/Users/...`
-* `eval.detector.ckpt` and `eval.cvs.ckpt` must exist before evaluation.
-
----
-
-## 2) Train the detector (Faster R-CNN)
-
-Run:
+### A. Baseline (ResNet-50 / Single Frame)
 
 ```powershell
+# Detector
 python train_detector.py --config config.toml
-```
 
-Outputs saved to:
-
-* `runs/detector/detector_last.pth`
-* `runs/detector/detector_best.pth`
-* `runs/detector/history.jsonl`
-* `runs/detector/meta.json`
-
-### What is val mAP?
-
-The training prints `val_map`, which is COCO **mAP@[0.5:0.95]** (the standard COCO metric). Higher is better.
-
----
-
-## 3) Evaluate the detector
-
-If you set `[eval.detector]` in `config.toml`, just run:
-
-```powershell
-python evaluate_detector.py --config config.toml
-```
-
-It prints something like:
-
-```json
-{
-  "split": "test",
-  "ckpt": "runs/detector/detector_best.pth",
-  "map": 0.3160
-}
-```
-
----
-
-## 4) Train CVS (C1/C2/C3)
-
-This trains a **multi-label classifier** outputting 3 logits for C1/C2/C3.
-
-Run:
-
-```powershell
+# CVS
 python train_cvs.py --config config.toml
 ```
 
-Key points:
+**Outputs:** `runs/detector_baseline2` and `runs/cvs_baseline2`
 
-* The CSV uses `vid` + `frame`. The code matches images by generating filename stem:
-
-  * default pattern: `"{vid}_{frame}"` → like `166_13700.jpg`
-* If your filenames differ, change:
-
-  * `cvs.data.filename_pattern` in `config.toml`
-
-Optional (recommended):
-
-* `cvs.data.keyframes_only=true` uses only CSV rows where `is_ds_keyframe == TRUE`.
-
-Outputs:
-
-* `runs/cvs/cvs_last.pth`
-* `runs/cvs/cvs_best.pth`
-* `runs/cvs/history.jsonl`
-* `runs/cvs/meta.json`
-
-### Why do I see 3 precision/recall/F1 values?
-
-Because CVS has **3 separate binary labels** (C1,C2,C3). The script prints metrics per criterion + macro average.
-
----
-
-## 5) Evaluate CVS
-
-If you set `[eval.cvs]` in `config.toml`, run:
+### B. Tuned (ResNet-101 / Temporal LSTM)
 
 ```powershell
-python evaluate_cvs.py --config config.toml
+# Detector (ResNet-101 + Scheduler)
+python train_detector_tuned.py --config config_tuned.toml
+
+# CVS (Temporal Sequence Length = 5)
+python train_cvs_tuned.py --config config_tuned.toml
 ```
 
-Example output:
+**Outputs:** `runs/detector_tuned_r101` and `runs/cvs_tuned_temporal`
 
-```json
-{
-  "split": "test",
-  "macro_f1": 0.48,
-  "per_criterion": [...]
-}
-```
+-----
 
----
+## 2\) Evaluate the Models
 
-## CLI Overrides (optional)
+Use the specific script corresponding to the model type (Baseline vs. Tuned).
 
-Any setting can be overridden without editing TOML. Examples:
-
-Detector:
+### Baseline Evaluation
 
 ```powershell
-python train_detector.py --config config.toml --epochs 10 --lr 0.001
-```
-
-CVS:
-
-```powershell
-python train_cvs.py --config config.toml --batch_size 16 --epochs 5
-```
-
-CVS filename pattern override:
-
-```powershell
-python train_cvs.py --config config.toml --filename_pattern "{vid}_{frame}"
-```
-
-
-## What checkpoints are (.pth)?
-
-`.pth` files store **model weights** (parameters).
-To use them:
-
-* build the same architecture
-* call `load_state_dict(torch.load(...))`
-
----
-
-## Recommended workflow
-
-1. Train detector
-2. Evaluate detector on test
-3. Train CVS
-4. Evaluate CVS on test
-5. For report: include training curves (`history.jsonl`) and final metrics
-
----
-
-## Final quick commands
-
-```powershell
-# activate venv
-.\endoscapes_venv\Scripts\activate
-
-# train detector
-python train_detector.py --config config.toml
-
-# eval detector
+# Detector (mAP)
 python evaluate_detector.py --config config.toml
 
-# train cvs
-python train_cvs.py --config config.toml
-
-# eval cvs
+# CVS (Macro F1)
 python evaluate_cvs.py --config config.toml
-
-# predict using detector
-python predict_detector_one.py --config config.toml
 ```
 
+### Tuned Evaluation
+
+*Note: Must use `_tuned.py` scripts to handle ResNet-101 and Temporal Data loading.*
+
+```powershell
+# Detector (mAP)
+python evaluate_detector_tuned.py --config config_tuned.toml
+
+# CVS (Macro F1 on Video Sequences)
+python evaluate_cvs_tuned.py --config config_tuned.toml
 ```
-::contentReference[oaicite:0]{index=0}
+
+-----
+
+## 3\) Visualize Predictions (Qualitative Analysis)
+
+You can pick a random annotated image to see how well your models perform visually.
+
+**To visualize Baseline models:**
+
+```powershell
+python predict_detector_one.py --config config.toml --pick_annotated
+```
+
+**To visualize Tuned models:**
+
+```powershell
+python predict_detector_one.py --config config_tuned.toml --pick_annotated
+```
+
+This will display:
+
+1.  **Ground Truth:** Actual Bounding Boxes + Actual CVS Labels (from CSV).
+2.  **Prediction:** Predicted Boxes + Predicted CVS Probabilities.
+
+-----
+
+## Recommended Workflow for Report
+
+1.  **Train Baseline:** Run `train_detector.py` and `train_cvs.py`.
+2.  **Train Tuned:** Run `train_detector_tuned.py` and `train_cvs_tuned.py`.
+3.  **Plot Training Curves:** Use the `history.jsonl` files generated in the `runs/` folders to plot Loss vs. Epoch for both models.
+4.  **Compare Metrics:** Run the evaluation scripts and compare `mAP` (Detector) and `Macro F1` (CVS).
+5.  **Visual Evidence:** Use `predict_detector_one.py` to save example images where the Tuned model performs better than the Baseline (e.g., detecting a tool that the Baseline missed, or correctly classifying a CVS criteria).
+
+<!-- end list -->
+
+```
 ```

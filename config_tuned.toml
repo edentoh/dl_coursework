@@ -1,16 +1,13 @@
 # config_tuned.toml
-# Tuned experiment config (keeps your baseline untouched by using new out_dir)
-# Goals:
-# - Detector: train longer + larger image size (better small tool detection)
-# - CVS: train longer + higher threshold to reduce false positives
+# Tuned experiment config for ResNet-101 + Temporal Models
 
 [paths]
 data_root = "C:/Users/TUF/COMP0220_Deep_Learning/coursework/endoscapes"
 runs_dir  = "runs"
 
-# -------------------------
-# Detector (Faster R-CNN)
-# -------------------------
+# ---------------------------------------------------------
+# Detector (Faster R-CNN ResNet-101)
+# ---------------------------------------------------------
 [detector.data]
 train_split = "train"
 val_split   = "val"
@@ -18,63 +15,63 @@ test_split  = "test"
 ann_name    = "annotation_coco.json"
 
 [detector.train]
-epochs       = 40
-batch_size   = 2
+epochs       = 50
+batch_size   = 2       # Keep at 2 for ResNet-101 on 8GB VRAM
 num_workers  = 4
-lr           = 0.005
-weight_decay = 0.0001
+lr           = 0.003
+weight_decay = 0.0005
 momentum     = 0.9
 amp          = true
 freeze_backbone = false
 seed         = 42
-out_dir      = "runs/detector_tuned_e40_img800"
+out_dir      = "runs/detector_tuned_r101_2"
 
 [detector.model]
-# higher resolution tends to help small objects (tools)
-img_min_size = 800
+# Higher resolution helps small tool detection
+img_min_size = 850
 img_max_size = 1333
 
-# -------------------------
-# CVS Classifier
-# -------------------------
+# ---------------------------------------------------------
+# CVS Classifier (Temporal ResNet-101 + LSTM)
+# ---------------------------------------------------------
 [cvs.data]
 metadata_csv = "all_metadata.csv"
 train_split  = "train"
 val_split    = "val"
 filename_pattern = "{vid}_{frame}"
 keyframes_only   = true
+seq_len          = 5   # NEW: Required for Temporal Model (5 frames context)
 
 [cvs.train]
-epochs       = 40
-batch_size   = 32
+epochs       = 40      # Temporal training is slower; 25 is usually sufficient
+batch_size   = 8       # CRITICAL: Lowered to 8 to fit ResNet-101+LSTM in 8GB VRAM
 num_workers  = 4
-lr           = 0.0002
-weight_decay = 0.0001
+lr           = 0.00005  # Lower LR for fine-tuning deep backbone
+weight_decay = 0.001
 amp          = true
 freeze_backbone = false
 seed         = 42
 image_size   = 224
-out_dir      = "runs/cvs_tuned_e40_lr2e4_thr65"
+out_dir      = "runs/cvs_tuned_temporal_2"
 
-# -------------------------
-# Evaluate settings
-# -------------------------
+# ---------------------------------------------------------
+# Evaluate settings (Points to new tuned folders)
+# ---------------------------------------------------------
 [eval.detector]
 split = "test"
-ckpt  = "runs/detector_tuned_e40_img800/detector_best.pth"
-meta  = "runs/detector_tuned_e40_img800/meta.json"
+ckpt  = "runs/detector_tuned_r101_2/detector_tuned_best.pth"
+meta  = "runs/detector_tuned_r101_2/meta.json"
 ann_name    = "annotation_coco.json"
 batch_size  = 2
 num_workers = 4
 
 [eval.cvs]
 split = "test"
-ckpt  = "runs/cvs_tuned_e40_lr2e4_thr65/cvs_best.pth"
-meta  = "runs/cvs_tuned_e40_lr2e4_thr65/meta.json"
-batch_size  = 32
+ckpt  = "runs/cvs_tuned_temporal_2/cvs_tuned_best.pth"
+meta  = "runs/cvs_tuned_temporal_2/meta.json"
+batch_size  = 8
 num_workers = 4
-# Higher threshold → fewer false positives (usually higher precision, lower recall)
-threshold = 0.75
+threshold = 0.65
 
 [predict.detector]
 # which split/folder to read images from
@@ -82,8 +79,7 @@ split = "test"
 ann_name = "annotation_coco.json"
 
 # if image is empty AND pick_annotated=false, script will error
-# you can set either full path OR just filename (e.g. "166_13700.jpg")
-image = ""   # example: "166_13700.jpg" or "C:/.../endoscapes/test/166_13700.jpg"
+image = ""   
 
 # if true, it will randomly pick an image id that exists in COCO annotations
 pick_annotated = true
