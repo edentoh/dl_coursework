@@ -13,7 +13,7 @@ import torch.nn as nn
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms as T
-from torchvision.models import resnet101, ResNet101_Weights
+from torchvision.models import resnet50, ResNet50_Weights 
 
 from config_utils import load_toml, deep_get
 
@@ -96,7 +96,7 @@ class TemporalCVSDataset(Dataset):
         self.groups = dict(list(self.df.groupby("vid")))
         self.samples = self.df.to_dict('records')
 
-        # Use ImageNet Normalization for ResNet-101
+        # Use ImageNet Normalization
         norm = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         
         if train:
@@ -149,14 +149,14 @@ class TemporalCVSDataset(Dataset):
 
 
 # ---------------------------------------------------------
-# 2. Temporal Model (ResNet101 + LSTM)
+# 2. Temporal Model (ResNet50 + LSTM)
 # ---------------------------------------------------------
 class TemporalCVSModel(nn.Module):
-    def __init__(self, num_classes=3, hidden_dim=256, freeze_backbone=False):
+    def __init__(self, num_classes=3, hidden_dim=256, dropout=0.5, bidirectional=True, freeze_backbone=False):
         super().__init__()
-        # ResNet-101
-        weights = ResNet101_Weights.DEFAULT
-        resnet = resnet101(weights=weights)
+        
+        weights = ResNet50_Weights.DEFAULT
+        resnet = resnet50(weights=weights)
         
         if freeze_backbone:
             for param in resnet.parameters():
@@ -165,14 +165,19 @@ class TemporalCVSModel(nn.Module):
         self.feature_extractor = nn.Sequential(*list(resnet.children())[:-1])
         self.feat_dim = resnet.fc.in_features 
         
-        # Temporal Head
-        # REMOVED: dropout=0.5 from inside LSTM (it was useless)
-        self.lstm = nn.LSTM(input_size=self.feat_dim, hidden_size=hidden_dim, num_layers=1, batch_first=True)
+        self.bidirectional = bidirectional
+        self.lstm = nn.LSTM(
+            input_size=self.feat_dim, 
+            hidden_size=hidden_dim, 
+            num_layers=1, 
+            batch_first=True, 
+            bidirectional=self.bidirectional
+        )
         
-        # ADDED: Explicit Dropout Layer
-        self.dropout = nn.Dropout(p=0.5) 
+        self.dropout = nn.Dropout(p=dropout) 
         
-        self.fc = nn.Linear(hidden_dim, num_classes)
+        fc_input_dim = hidden_dim * 2 if self.bidirectional else hidden_dim
+        self.fc = nn.Linear(fc_input_dim, num_classes)
 
     def forward(self, x):
         B, T, C, H, W = x.shape
@@ -184,9 +189,7 @@ class TemporalCVSModel(nn.Module):
         lstm_out, _ = self.lstm(feats)
         last_out = lstm_out[:, -1, :]          
         
-        # Apply Dropout here
         last_out = self.dropout(last_out)
-        
         logits = self.fc(last_out)
         return logits
 
@@ -257,6 +260,137 @@ def evaluate(model, loader, device, loss_fn, threshold: float):
     return total / max(1, len(loader)), macro_f1, per
 
 
+# --- WRAPPER FUNCTION TO RUN ONE EXPERIMENT ---
+def run_experiment(exp_cfg, common_cfg):
+    print("="*60)
+    print(f"STARTING EXPERIMENT: Hidden Dim = {exp_cfg['hidden_dim']}")
+    print("="*60)
+    
+    # Merge configs
+    # Create specific output directory
+    out_dir = Path(common_cfg.out_dir) / f"hidden_{exp_cfg['hidden_dim']}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    cfg = Cfg(
+        data_root=common_cfg.data_root,
+        metadata_csv=common_cfg.metadata_csv,
+        out_dir=out_dir, # Use the specific subfolder
+        train_split=common_cfg.train_split,
+        val_split=common_cfg.val_split,
+        epochs=common_cfg.epochs,
+        batch_size=common_cfg.batch_size,
+        num_workers=4,
+        lr=common_cfg.lr,
+        weight_decay=common_cfg.weight_decay,
+        amp=True,
+        freeze_backbone=False,
+        seed=42,
+        image_size=common_cfg.image_size,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        keyframes_only=True,
+        filename_pattern="{vid}_{frame}",
+        threshold=0.6,
+        config_path=common_cfg.config_path,
+        seq_len=common_cfg.seq_len,
+    )
+
+    seed_everything(cfg.seed)
+    
+    df = pd.read_csv(cfg.metadata_csv)
+    if cfg.keyframes_only:
+        df = df[df["is_ds_keyframe"].astype(str).str.upper().isin(["TRUE", "1", "YES"])].copy()
+
+    train_dir = cfg.data_root / cfg.train_split
+    val_dir = cfg.data_root / cfg.val_split
+
+    train_ds = TemporalCVSDataset(train_dir, df, cfg.image_size, train=True, pattern=cfg.filename_pattern, seq_len=cfg.seq_len)
+    val_ds = TemporalCVSDataset(val_dir, df, cfg.image_size, train=False, pattern=cfg.filename_pattern, seq_len=cfg.seq_len)
+
+    # Use the Experiment-Specific Hidden Dim
+    HIDDEN_DIM = exp_cfg['hidden_dim']
+    DROPOUT_P = 0.7
+    BIDIRECTIONAL = True
+    POS_WEIGHT_VALS = [4.0, 4.0, 4.5] 
+    
+    model = TemporalCVSModel(
+        num_classes=3, 
+        hidden_dim=HIDDEN_DIM, 
+        dropout=DROPOUT_P, 
+        bidirectional=BIDIRECTIONAL,
+        freeze_backbone=cfg.freeze_backbone
+    )
+    model.to(cfg.device)
+
+    pos_weight = torch.tensor(POS_WEIGHT_VALS).to(cfg.device)
+    loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    
+    milestones = [int(cfg.epochs*0.6), int(cfg.epochs*0.8)]
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+    
+    scaler = torch.amp.GradScaler("cuda") if (cfg.amp and cfg.device == "cuda") else None
+
+    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers, pin_memory=True)
+
+    best_f1 = -1.0
+    (cfg.out_dir / "history.jsonl").write_text("", encoding="utf-8")
+
+    for epoch in range(1, cfg.epochs + 1):
+        tr_loss = train_one_epoch(model, train_loader, optimizer, device=cfg.device, scaler=scaler, loss_fn=loss_fn)
+        scheduler.step()
+        
+        va_loss, macro_f1, per = evaluate(model, val_loader, device=cfg.device, loss_fn=loss_fn, threshold=cfg.threshold)
+        curr_lr = optimizer.param_groups[0]["lr"]
+
+        print(f"[HDim={HIDDEN_DIM}] Epoch {epoch:02d} | Loss: {tr_loss:.4f} | Val Loss: {va_loss:.4f} | Val F1: {macro_f1:.4f}")
+        
+        row = {
+            "epoch": epoch, 
+            "train_loss": tr_loss, 
+            "val_loss": va_loss, 
+            "val_macro_f1": macro_f1,
+            "lr": curr_lr
+        }
+        with open(cfg.out_dir / "history.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+
+        if macro_f1 > best_f1:
+            best_f1 = macro_f1
+            torch.save(model.state_dict(), cfg.out_dir / "cvs_tuned_best.pth")
+            
+            meta = {
+                "config_path": cfg.config_path,
+                "data_root": str(cfg.data_root),
+                "metadata_csv": cfg.metadata_csv.name,
+                "train_split": cfg.train_split,
+                "val_split": cfg.val_split,
+                "out_dir": str(cfg.out_dir),
+                
+                "image_size": cfg.image_size,
+                "seq_len": cfg.seq_len,
+                "filename_pattern": cfg.filename_pattern,
+                "keyframes_only": cfg.keyframes_only,
+                
+                "backbone": "resnet50",
+                "model_type": "temporal_lstm_bidirectional",
+                "hidden_dim": HIDDEN_DIM,  # Correctly saved per run
+                "dropout": DROPOUT_P,
+                "bidirectional": BIDIRECTIONAL,
+                
+                "epochs": cfg.epochs,
+                "batch_size": cfg.batch_size,
+                "lr": cfg.lr,
+                "weight_decay": cfg.weight_decay,
+                "pos_weight": POS_WEIGHT_VALS,
+                "seed": cfg.seed,
+                "best_val_macro_f1": float(best_f1),
+            }
+            (cfg.out_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            
+    print(f"Finished Exp (HDim={HIDDEN_DIM}). Best F1: {best_f1:.4f}\n")
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=str, default="config_tuned.toml")
@@ -272,117 +406,55 @@ def main():
          raise RuntimeError("Missing data_root in config")
     
     metadata_csv_name = deep_get(cfg_toml, "cvs.data.metadata_csv", "all_metadata.csv")
-    out_dir = deep_get(cfg_toml, "cvs.train.out_dir", "runs/cvs_tuned")
+    
+    # We will use this base dir and append subfolders in run_experiment
+    base_out_dir = deep_get(cfg_toml, "cvs.train.out_dir", "runs/cvs_tuned")
+    
     seq_len = int(deep_get(cfg_toml, "cvs.data.seq_len", 5))
-    
     epochs = int(deep_get(cfg_toml, "cvs.train.epochs", 25))
-    batch_size = int(deep_get(cfg_toml, "cvs.train.batch_size", 8)) # Adjusted for ResNet101
+    batch_size = int(deep_get(cfg_toml, "cvs.train.batch_size", 8)) 
     lr = float(deep_get(cfg_toml, "cvs.train.lr", 1e-4))
+    weight_decay = float(deep_get(cfg_toml, "cvs.train.weight_decay", 1e-4))
+    image_size = int(deep_get(cfg_toml, "cvs.train.image_size", 224))
     
-    cfg = Cfg(
+    # Common Config Object
+    common_cfg = Cfg(
         data_root=Path(data_root),
         metadata_csv=Path(data_root) / metadata_csv_name,
-        out_dir=Path(out_dir),
+        out_dir=Path(base_out_dir), 
         train_split=deep_get(cfg_toml, "cvs.data.train_split", "train"),
         val_split=deep_get(cfg_toml, "cvs.data.val_split", "val"),
         epochs=epochs,
         batch_size=batch_size,
         num_workers=4,
         lr=lr,
-        weight_decay=1e-4,
+        weight_decay=weight_decay,
         amp=True,
         freeze_backbone=False,
         seed=42,
-        image_size=224,
+        image_size=image_size,
         device="cuda" if torch.cuda.is_available() else "cpu",
         keyframes_only=True,
         filename_pattern="{vid}_{frame}",
         threshold=0.6,
         config_path=str(cfg_path),
-        seq_len=seq_len
+        seq_len=seq_len,
     )
 
-    seed_everything(cfg.seed)
-    cfg.out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Using device: {cfg.device}")
+    # --- DEFINE THE EXPERIMENTS HERE ---
+    experiments = [
+        {"hidden_dim": 512},
+        {"hidden_dim": 128},
+
+    ]
+
+    print(f"Found {len(experiments)} experiments to run sequentially.")
     
-    df = pd.read_csv(cfg.metadata_csv)
-    if cfg.keyframes_only:
-        df = df[df["is_ds_keyframe"].astype(str).str.upper().isin(["TRUE", "1", "YES"])].copy()
-
-    train_dir = cfg.data_root / cfg.train_split
-    val_dir = cfg.data_root / cfg.val_split
-
-    print(f"Initializing Temporal (ResNet101+LSTM) Datasets (seq_len={cfg.seq_len})...")
-    train_ds = TemporalCVSDataset(train_dir, df, cfg.image_size, train=True, pattern=cfg.filename_pattern, seq_len=cfg.seq_len)
-    val_ds = TemporalCVSDataset(val_dir, df, cfg.image_size, train=False, pattern=cfg.filename_pattern, seq_len=cfg.seq_len)
-    print(f"Train: {len(train_ds)} seqs | Val: {len(val_ds)} seqs")
-
-    model = TemporalCVSModel(num_classes=3, hidden_dim=256, freeze_backbone=cfg.freeze_backbone)
-    model.to(cfg.device)
-
-    pos_weight = torch.tensor([7.0, 7.0, 7.0]).to(cfg.device)
-    loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[int(cfg.epochs*0.6), int(cfg.epochs*0.8)], gamma=0.1)
-    
-    scaler = torch.amp.GradScaler("cuda") if (cfg.amp and cfg.device == "cuda") else None
-
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers, pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers, pin_memory=True)
-
-    best_f1 = -1.0
-    
-    # Ensure history file exists
-    (cfg.out_dir / "history.jsonl").write_text("", encoding="utf-8")
-
-    print("Starting training...")
-
-    for epoch in range(1, cfg.epochs + 1):
-        tr_loss = train_one_epoch(model, train_loader, optimizer, device=cfg.device, scaler=scaler, loss_fn=loss_fn)
-        scheduler.step()
+    for i, exp in enumerate(experiments):
+        print(f"\n>>> Running Experiment {i+1}/{len(experiments)}: {exp}")
+        run_experiment(exp, common_cfg)
         
-        va_loss, macro_f1, per = evaluate(model, val_loader, device=cfg.device, loss_fn=loss_fn, threshold=cfg.threshold)
-        curr_lr = optimizer.param_groups[0]["lr"]
-
-        print(f"Epoch {epoch:02d} | Loss: {tr_loss:.4f} | Val F1: {macro_f1:.4f} | LR: {curr_lr:.6f}")
-        
-        # Save History
-        row = {
-            "epoch": epoch, 
-            "train_loss": tr_loss, 
-            "val_loss": va_loss, 
-            "val_macro_f1": macro_f1,
-            "lr": curr_lr
-        }
-        with open(cfg.out_dir / "history.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps(row) + "\n")
-
-        if macro_f1 > best_f1:
-            best_f1 = macro_f1
-            torch.save(model.state_dict(), cfg.out_dir / "cvs_tuned_best.pth")
-            
-    print(f"Done. Best Tuned F1: {best_f1:.4f}")
-
-    # Save Meta
-    meta = {
-        "config_path": cfg.config_path,
-        "data_root": str(cfg.data_root),
-        "metadata_csv": cfg.metadata_csv.name,
-        "train_split": cfg.train_split,
-        "val_split": cfg.val_split,
-        "out_dir": str(cfg.out_dir),
-        "epochs": cfg.epochs,
-        "batch_size": cfg.batch_size,
-        "lr": cfg.lr,
-        "weight_decay": cfg.weight_decay,
-        "backbone": "resnet101",
-        "model_type": "temporal_lstm",
-        "best_val_macro_f1": float(best_f1),
-        "seq_len": cfg.seq_len
-    }
-    (cfg.out_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    print(f"Saved meta.json to {cfg.out_dir}")
+    print("\nALL EXPERIMENTS COMPLETED.")
 
 if __name__ == "__main__":
     main()

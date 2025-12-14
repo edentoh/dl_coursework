@@ -1,0 +1,881 @@
+[
+  {
+    "eval_split": "test",
+    "eval_map": 0.3082768978384119,
+    "eval_map_50": 0.5883784538546065,
+    "eval_map_75": 0.2890058850870786,
+    "eval_map_small": 0.09759499225443924,
+    "eval_map_medium": 0.2300323473003554,
+    "eval_map_large": 0.33124231599132625,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres/detector_tuned_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres",
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.005,
+      "backbone": "resnet50",
+      "scheduler": "MultiStepLR",
+      "best_val_map": 0.26701610884043486,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "num_classes_including_bg": 7
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.29987648578988585,
+    "eval_map_50": 0.5689930549151302,
+    "eval_map_75": 0.28857543164556454,
+    "eval_map_small": 0.10637692948497209,
+    "eval_map_medium": 0.21720708523860047,
+    "eval_map_large": 0.3049105693396537,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_2/detector_tuned_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_2",
+      "backbone": "resnet50",
+      "img_min_size": 1200,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.005,
+      "momentum": 0.9,
+      "weight_decay": 0.0001,
+      "optimizer": "SGD",
+      "scheduler": "MultiStepLR",
+      "milestones": [
+        21,
+        27
+      ],
+      "gamma": 0.1,
+      "amp": true,
+      "seed": 42,
+      "best_val_map": 0.26048340764723454,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.3283059405019109,
+    "eval_map_50": 0.598131388006487,
+    "eval_map_75": 0.31032004409049535,
+    "eval_map_small": 0.0953945550266869,
+    "eval_map_medium": 0.2619306382169008,
+    "eval_map_large": 0.3420225539685566,
+    "eval_checkpoint": "runs/detector_tuned_r101/detector_tuned_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r101",
+      "epochs": 40,
+      "batch_size": 2,
+      "lr": 0.005,
+      "backbone": "resnet101",
+      "scheduler": "MultiStepLR",
+      "best_val_map": 0.3006040705695962,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "num_classes_including_bg": 7
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.29936766105839796,
+    "eval_map_50": 0.5384538999858715,
+    "eval_map_75": 0.2870646170252644,
+    "eval_map_small": 0.1230271752438624,
+    "eval_map_medium": 0.21661711124186853,
+    "eval_map_large": 0.2902058155258906,
+    "eval_checkpoint": "runs/detector_baseline2/detector_best.pth",
+    "training_meta": {
+      "config_path": "config.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "train_split": "train",
+      "val_split": "val",
+      "ann_name": "annotation_coco.json",
+      "out_dir": "runs\\detector_baseline2",
+      "epochs": 15,
+      "batch_size": 2,
+      "num_workers": 4,
+      "lr": 0.01,
+      "weight_decay": 0.0001,
+      "momentum": 0.9,
+      "amp": true,
+      "img_min_size": 640,
+      "img_max_size": 1024,
+      "freeze_backbone": false,
+      "seed": 42,
+      "device": "cuda",
+      "num_classes_including_bg": 7,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.31141643937884983,
+    "eval_map_50": 0.5733473187108143,
+    "eval_map_75": 0.3044444020539448,
+    "eval_map_small": 0.11431265165555969,
+    "eval_map_medium": 0.23091552657483536,
+    "eval_map_large": 0.3104749069643052,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_3/detector_tuned_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_3",
+      "backbone": "resnet50",
+      "img_min_size": 1200,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.01,
+      "momentum": 0.9,
+      "weight_decay": 0.0001,
+      "optimizer": "SGD",
+      "scheduler": "MultiStepLR",
+      "milestones": [
+        21,
+        27
+      ],
+      "gamma": 0.1,
+      "amp": true,
+      "seed": 42,
+      "best_val_map": 0.26490447161228875,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.2870562154969384,
+    "eval_map_50": 0.5487937240758425,
+    "eval_map_75": 0.2641710992209463,
+    "eval_map_small": 0.09302731912673953,
+    "eval_map_medium": 0.19596064644212172,
+    "eval_map_large": 0.32143722071894043,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_3/detector_tuned_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_3",
+      "backbone": "resnet50",
+      "img_min_size": 1200,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 50,
+      "batch_size": 4,
+      "lr": 0.01,
+      "momentum": 0.9,
+      "weight_decay": 0.0001,
+      "optimizer": "SGD",
+      "scheduler": "MultiStepLR",
+      "milestones": [
+        35,
+        45
+      ],
+      "gamma": 0.1,
+      "amp": true,
+      "seed": 42,
+      "best_val_map": 0.25219182842772553,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.32109027128566264,
+    "eval_map_50": 0.5669715406078671,
+    "eval_map_75": 0.3184866336632893,
+    "eval_map_small": 0.12397176331455043,
+    "eval_map_medium": 0.22917959815191422,
+    "eval_map_large": 0.2984150835610015,
+    "eval_checkpoint": "runs/detector_baseline/detector_best.pth",
+    "training_meta": {
+      "config_path": "config.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "train_split": "train",
+      "val_split": "val",
+      "ann_name": "annotation_coco.json",
+      "out_dir": "runs\\detector_baseline",
+      "epochs": 20,
+      "batch_size": 2,
+      "num_workers": 4,
+      "lr": 0.005,
+      "weight_decay": 0.0001,
+      "momentum": 0.9,
+      "amp": true,
+      "img_min_size": 640,
+      "img_max_size": 1024,
+      "freeze_backbone": false,
+      "seed": 42,
+      "device": "cuda",
+      "num_classes_including_bg": 7,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.031134270153318086,
+    "eval_map_50": 0.11652355772060125,
+    "eval_map_75": 0.006174197135468307,
+    "eval_map_small": 0.028486917497481813,
+    "eval_map_medium": 0.08019704977166951,
+    "eval_map_large": 0.019662211964489088,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_5/detector_tuned_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_5",
+      "backbone": "resnet50_coco",
+      "img_min_size": 1200,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.005,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.27540314453060216,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.031134270153318086,
+    "eval_map_50": 0.11652355772060125,
+    "eval_map_75": 0.006174197135468307,
+    "eval_map_small": 0.028486917497481813,
+    "eval_map_medium": 0.08019704977166951,
+    "eval_map_large": 0.019662211964489088,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_5/detector_tuned_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_5",
+      "backbone": "resnet50_coco",
+      "img_min_size": 1200,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.005,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.27540314453060216,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.2779619336423365,
+    "eval_map_50": 0.5479817984411453,
+    "eval_map_75": 0.2568050782215504,
+    "eval_map_small": 0.12532503695427696,
+    "eval_map_medium": 0.1992209620496601,
+    "eval_map_large": 0.30064652326617686,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_3/detector_tuned_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_3",
+      "backbone": "resnet50",
+      "img_min_size": 1024,
+      "img_max_size": 1440,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.005,
+      "best_val_map": 0.24343397248097967,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.031134270153318086,
+    "eval_map_50": 0.11652355772060125,
+    "eval_map_75": 0.006174197135468307,
+    "eval_map_small": 0.028486917497481813,
+    "eval_map_medium": 0.08019704977166951,
+    "eval_map_large": 0.019662211964489088,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_5/detector_tuned_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_5",
+      "backbone": "resnet50_coco",
+      "img_min_size": 1200,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.005,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.27540314453060216,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.31432555518049327,
+    "eval_map_50": 0.5761461997130685,
+    "eval_map_75": 0.32045881187377917,
+    "eval_map_small": 0.1100111506512725,
+    "eval_map_medium": 0.23441030716104716,
+    "eval_map_large": 0.2990595175532166,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_5/detector_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_5",
+      "backbone": "resnet50_coco",
+      "img_min_size": 1200,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.005,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.27540314453060216,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.3117844241632156,
+    "eval_map_50": 0.5632223451625495,
+    "eval_map_75": 0.31116178171990194,
+    "eval_map_small": 0.0890074630260037,
+    "eval_map_medium": 0.2410364828215757,
+    "eval_map_large": 0.3074126645336357,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_5/detector_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_5",
+      "backbone": "resnet50_coco",
+      "img_min_size": 1024,
+      "img_max_size": 1440,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.005,
+      "weight_decay": 0.001,
+      "best_val_map": 0.2716161908023383,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.31275098808634144,
+    "eval_map_50": 0.5958229602238168,
+    "eval_map_75": 0.2930350545371473,
+    "eval_map_small": 0.09752633571885108,
+    "eval_map_medium": 0.23295446952332127,
+    "eval_map_large": 0.3336842488628914,
+    "eval_checkpoint": "runs/detector_baseline_4/detector_best.pth",
+    "training_meta": {
+      "config_path": "config.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_baseline_4",
+      "backbone": "resnet50_imagenet_only",
+      "img_min_size": 440,
+      "img_max_size": 840,
+      "num_classes_including_bg": 7,
+      "epochs": 15,
+      "batch_size": 8,
+      "lr": 0.01,
+      "weight_decay": 0.0001,
+      "best_val_map": 0.27559019381618216,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.20906437101946818,
+    "eval_map_50": 0.40523345001227346,
+    "eval_map_75": 0.1996607057861043,
+    "eval_map_small": 0.0217981800229933,
+    "eval_map_medium": 0.1379598699222206,
+    "eval_map_large": 0.20470007520516492,
+    "eval_checkpoint": "runs/detector_baseline_5/detector_best.pth",
+    "training_meta": {
+      "config_path": "config.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_baseline_5",
+      "backbone": "resnet50_imagenet_only",
+      "img_min_size": 440,
+      "img_max_size": 840,
+      "num_classes_including_bg": 7,
+      "epochs": 15,
+      "batch_size": 8,
+      "lr": 0.001,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.18485853716639114,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.3282107130579178,
+    "eval_map_50": 0.5631403999494332,
+    "eval_map_75": 0.31942363488159725,
+    "eval_map_small": 0.08526660301779812,
+    "eval_map_medium": 0.2426063440068734,
+    "eval_map_large": 0.32990528152858345,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_6/detector_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_6",
+      "backbone": "resnet50_coco",
+      "img_min_size": 1024,
+      "img_max_size": 1440,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.01,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.28305439612740657,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.32741667380872047,
+    "eval_map_50": 0.5649180106227789,
+    "eval_map_75": 0.3246836874702277,
+    "eval_map_small": 0.10616487197204458,
+    "eval_map_medium": 0.23168125595170147,
+    "eval_map_large": 0.3337448224024816,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_8/detector_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_8",
+      "backbone": "resnet50_coco",
+      "img_min_size": 720,
+      "img_max_size": 1440,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.01,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.2911414079163191,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.3330311985150185,
+    "eval_map_50": 0.5854782060627011,
+    "eval_map_75": 0.33368921004187785,
+    "eval_map_small": 0.11882670411044606,
+    "eval_map_medium": 0.24719505763839164,
+    "eval_map_large": 0.33729065885386894,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_10/detector_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_10",
+      "backbone": "resnet50_coco",
+      "img_min_size": 1200,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.008,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.2904681336590329,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.3327104227030234,
+    "eval_map_50": 0.5748364059784216,
+    "eval_map_75": 0.32373153850658437,
+    "eval_map_small": 0.1171260508938218,
+    "eval_map_medium": 0.2402167705765313,
+    "eval_map_large": 0.345724299502552,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_9/detector_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_9",
+      "backbone": "resnet50_coco",
+      "img_min_size": 640,
+      "img_max_size": 1440,
+      "num_classes_including_bg": 7,
+      "epochs": 30,
+      "batch_size": 4,
+      "lr": 0.01,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.3002110259748,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.3338762807510949,
+    "eval_map_50": 0.5870651244485493,
+    "eval_map_75": 0.3235849757606089,
+    "eval_map_small": 0.11297898123178025,
+    "eval_map_medium": 0.2429401381664382,
+    "eval_map_large": 0.36100816688707854,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_11/detector_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_11",
+      "backbone": "resnet50_coco",
+      "img_min_size": 640,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 25,
+      "batch_size": 4,
+      "lr": 0.008,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.297983724445356,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  },
+  {
+    "eval_split": "test",
+    "eval_map": 0.3322018992782356,
+    "eval_map_50": 0.566737270113992,
+    "eval_map_75": 0.3391610844332715,
+    "eval_map_small": 0.0955442151037995,
+    "eval_map_medium": 0.24294073853875736,
+    "eval_map_large": 0.34673733703731013,
+    "eval_checkpoint": "runs/detector_tuned_r50_highres_12/detector_best.pth",
+    "training_meta": {
+      "config_path": "config_tuned.toml",
+      "data_root": "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes",
+      "out_dir": "runs\\detector_tuned_r50_highres_12",
+      "backbone": "resnet50_coco",
+      "img_min_size": 720,
+      "img_max_size": 1600,
+      "num_classes_including_bg": 7,
+      "epochs": 20,
+      "batch_size": 4,
+      "lr": 0.008,
+      "weight_decay": 0.0005,
+      "best_val_map": 0.29584196308623034,
+      "cat_id_to_label": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      },
+      "label_to_cat_id": {
+        "1": 1,
+        "2": 2,
+        "3": 3,
+        "4": 4,
+        "5": 5,
+        "6": 6
+      }
+    }
+  }
+]

@@ -1,313 +1,317 @@
 import argparse
 import json
-import re
+import random
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, Any, List
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 from PIL import Image
 import matplotlib.pyplot as plt
-
-from pycocotools.coco import COCO
 from torchvision import transforms as T
-from torchvision.models.detection import FasterRCNN, fasterrcnn_resnet50_fpn
+from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models import resnet50, resnet101
+from pycocotools.coco import COCO
+
+from matplotlib.patches import FancyBboxPatch
+import textwrap
 
 from config_utils import load_toml, deep_get
 
-
 # ---------------------------------------------------------
-# Model Builders (Updated for Tuned Support)
+# 1. Model Builders
 # ---------------------------------------------------------
-def build_detector_model(num_classes: int, backbone_name: str = "resnet50", min_size: int = 640, max_size: int = 1024):
-    if backbone_name == "resnet101":
-        print(f"Building Faster R-CNN with {backbone_name}...")
-        backbone = resnet_fpn_backbone(backbone_name='resnet101', weights=None)
-        model = FasterRCNN(backbone, num_classes=num_classes, min_size=min_size, max_size=max_size)
-    else:
-        # Default ResNet-50
-        print(f"Building Faster R-CNN with {backbone_name}...")
-        try:
-            from torchvision.models.detection import FasterRCNN_ResNet50_FPN_Weights
-            weights = FasterRCNN_ResNet50_FPN_Weights.DEFAULT
-        except:
-            weights = "DEFAULT"
-        model = fasterrcnn_resnet50_fpn(weights=weights, min_size=min_size, max_size=max_size)
-        in_features = model.roi_heads.box_predictor.cls_score.in_features
-        model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+def build_detector(num_classes: int, meta: Dict[str, Any]):
+    backbone_name = meta.get("backbone", "resnet50")
+    min_size = int(meta.get("img_min_size", 800))
+    max_size = int(meta.get("img_max_size", 1333))
     
+    print(f"Loading Detector: {backbone_name} (Res: {min_size}-{max_size})")
+    
+    if "resnet101" in backbone_name:
+        backbone = resnet_fpn_backbone(backbone_name='resnet101', weights=None)
+    else:
+        backbone = resnet_fpn_backbone(backbone_name='resnet50', weights=None)
+        
+    model = FasterRCNN(backbone, num_classes=num_classes, min_size=min_size, max_size=max_size)
+    in_features = model.roi_heads.box_predictor.cls_score.in_features
+    model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
     return model
 
 class TemporalCVSModel(nn.Module):
-    """Same class as in train_cvs_tuned.py"""
-    def __init__(self, num_classes=3, hidden_dim=256):
+    def __init__(self, meta: Dict[str, Any], num_classes=3):
         super().__init__()
-        resnet = resnet101(weights=None)
+        backbone_name = meta.get("backbone", "resnet50")
+        hidden_dim = int(meta.get("hidden_dim", 256))
+        bidirectional = bool(meta.get("bidirectional", True))
+        
+        print(f"Loading CVS Model: {backbone_name} + LSTM")
+        
+        if "resnet101" in backbone_name:
+            resnet = resnet101(weights=None)
+        else:
+            resnet = resnet50(weights=None)
+            
         self.feature_extractor = nn.Sequential(*list(resnet.children())[:-1])
-        self.lstm = nn.LSTM(resnet.fc.in_features, hidden_dim, num_layers=1, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, num_classes)
+        self.feat_dim = resnet.fc.in_features
+        self.lstm = nn.LSTM(input_size=self.feat_dim, hidden_size=hidden_dim, num_layers=1, batch_first=True, bidirectional=bidirectional)
+        fc_input = hidden_dim * 2 if bidirectional else hidden_dim
+        self.fc = nn.Linear(fc_input, num_classes)
 
     def forward(self, x):
-        # x: (B, T, C, H, W)
         B, T, C, H, W = x.shape
-        x = x.view(B * T, C, H, W)
-        feats = self.feature_extractor(x).flatten(1).view(B, T, -1)
+        x_flat = x.view(B * T, C, H, W)
+        feats = self.feature_extractor(x_flat).flatten(1)
+        feats = feats.view(B, T, -1)
         lstm_out, _ = self.lstm(feats)
         return self.fc(lstm_out[:, -1, :])
 
-def build_cvs_model(model_type: str = "simple", out_dim: int = 3):
+def build_cvs(meta: Dict[str, Any], out_dim: int = 3):
+    model_type = meta.get("model_type", "simple")
     if "temporal" in model_type or "lstm" in model_type:
-        print(f"Building Temporal CVS Model ({model_type})...")
-        return TemporalCVSModel(num_classes=out_dim)
+        return TemporalCVSModel(meta, num_classes=out_dim)
     else:
-        print("Building Baseline CVS Model (ResNet50)...")
+        print("Loading CVS Model: Baseline ResNet50")
         model = resnet50(weights=None)
         model.fc = nn.Linear(model.fc.in_features, out_dim)
         return model
 
+# ---------------------------------------------------------
+# 2. LLM Text Generator
+# ---------------------------------------------------------
+def generate_llm_text(det_results, cvs_probs, cat_id_to_name):
+    """Translates numerical outputs into a surgical report prompt."""
+    det_lines = []
+    if len(det_results["scores"]) > 0:
+        for cid, score in zip(det_results["labels"], det_results["scores"]):
+            name = cat_id_to_name.get(cid, f"Object_{cid}")
+            det_lines.append(f"- {name} (Confidence: {score:.1%})")
+        det_summary = "Detected Anatomical Structures:\n" + "\n".join(det_lines)
+    else:
+        det_summary = "No specific anatomical structures or tools were detected in this view."
+
+    criteria_names = [
+        "Hepatocystic Triangle Cleared",
+        "Liver Bed Separated",
+        "Two Structures Only"
+    ]
+    
+    cvs_lines = []
+    for i, prob in enumerate(cvs_probs):
+        status = "SATISFIED" if prob > 0.5 else "NOT SATISFIED"
+        confidence_desc = "High" if prob > 0.8 or prob < 0.2 else "Moderate"
+        cvs_lines.append(f"Criterion {i+1} ({criteria_names[i]}): {status} ({prob:.1%} probability)")
+    
+    cvs_summary = "Critical View of Safety (CVS) Assessment:\n" + "\n".join(cvs_lines)
+
+    llm_prompt = (
+        "You are an AI Surgical Assistant. Analyze the following computer vision report from a laparoscopic cholecystectomy:\n\n"
+        f"{det_summary}\n\n"
+        f"{cvs_summary}\n\n"
+        "TASK: Provide a concise 2-sentence warning or confirmation to the surgeon regarding safety."
+    )
+    return llm_prompt
 
 # ---------------------------------------------------------
-# Utilities
+# 3. Visualization
 # ---------------------------------------------------------
-def find_image_id_by_filename(coco: COCO, filename: str) -> Optional[int]:
-    for img in coco.dataset.get("images", []):
-        if img.get("file_name") == filename:
-            return int(img["id"])
-    return None
+import matplotlib.pyplot as plt
 
+def draw_results(img, det_res, cvs_probs, cat_id_to_name, save_path):
+    # 2-row layout: image on top, CVS panel below (prevents overlap/clipping)
+    fig, (ax_img, ax_txt) = plt.subplots(
+        2, 1,
+        figsize=(12, 11),
+        gridspec_kw={"height_ratios": [12, 2]},
+        constrained_layout=True
+    )
 
-def get_cvs_gt(filename: str, csv_path: Path) -> Tuple[str, List[int]]:
-    if not csv_path.exists():
-        return "CSV Not Found", []
-    try:
-        stem = Path(filename).stem
-        parts = re.split(r'[_\-]', stem)
-        if len(parts) < 2: return "Filename Parse Error", []
-        vid, frame = int(parts[0]), int(parts[1])
+    # --- Image panel ---
+    ax_img.imshow(img)
+    ax_img.axis("off")
+    ax_img.set_title("Surgical AI Prediction", fontsize=16, pad=12)
 
-        df = pd.read_csv(csv_path)
-        row = df[(df['vid'] == vid) & (df['frame'] == frame)]
-        if len(row) == 0: return "No CSV Entry", []
-        
-        row = row.iloc[0]
-        c1, c2, c3 = int(row['C1']), int(row['C2']), int(row['C3'])
-        return f"C1:{c1}  C2:{c2}  C3:{c3}", [c1, c2, c3]
-    except Exception as e:
-        return f"Lookup Error: {e}", []
+    # 1) Draw detector boxes
+    boxes = det_res.get("boxes", [])
+    labels = det_res.get("labels", [])
+    scores = det_res.get("scores", [])
 
+    if len(boxes) > 0:
+        cmap = plt.get_cmap("tab10")
+        for i, box in enumerate(boxes):
+            cid = int(labels[i]) if i < len(labels) else -1
+            score = float(scores[i]) if i < len(scores) else 0.0
+            label = cat_id_to_name.get(cid, str(cid))
+            color = cmap(cid % 10) if cid >= 0 else (1, 1, 1, 1)
 
-def build_class_color_map(class_names: Dict[int, str]) -> Dict[int, Tuple[float, float, float, float]]:
-    cmap = plt.get_cmap("tab20")
-    ids = sorted(class_names.keys())
-    colors = {}
-    for i, cid in enumerate(ids):
-        colors[cid] = cmap(i % 20)
-    return colors
+            x1, y1, x2, y2 = box
+            rect = plt.Rectangle(
+                (x1, y1), x2 - x1, y2 - y1,
+                fill=False, linewidth=2.5, edgecolor=color
+            )
+            ax_img.add_patch(rect)
 
+            # Put label INSIDE the box near the top-left to avoid title collisions
+            text_str = f"{label}: {score:.2f}"
+            ax_img.text(
+                x1, y1 + 12, text_str,
+                color="white", fontsize=10, fontweight="bold",
+                bbox=dict(facecolor=color, alpha=0.85, edgecolor="none", pad=2),
+                va="top"
+            )
 
-def draw_boxes(ax, boxes_xyxy, label_texts, class_ids, class_colors, linestyle, linewidth=2.2, text_alpha=0.75):
-    for (x1, y1, x2, y2), txt, cid in zip(boxes_xyxy, label_texts, class_ids):
-        color = class_colors.get(cid, (1, 1, 1, 1))
-        rect = plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, linewidth=linewidth, linestyle=linestyle, edgecolor=color)
-        ax.add_patch(rect)
-        ax.text(x1, max(0, y1 - 2), txt, fontsize=9, color="black", bbox=dict(facecolor=color, alpha=text_alpha, edgecolor="none", pad=2))
+# --- CVS panel (separate axis so it never collides with the image/title) ---
+    ax_txt.axis("off")
+    ax_txt.set_xlim(0, 1)
+    ax_txt.set_ylim(0, 1)
 
+    ax_txt.text(
+        0.5, 0.88, "CRITICAL VIEW OF SAFETY PROBABILITIES",
+        ha="center", va="center", fontsize=14, fontweight="bold"
+    )
 
-def draw_cvs_info(ax, title_prefix, filename, info_text, bg_color="black"):
-    full_text = f"{title_prefix} | {filename}\n{info_text}"
-    ax.text(10, 10, full_text, fontsize=12, color="white", verticalalignment='top', bbox=dict(facecolor=bg_color, alpha=0.7, edgecolor="none", pad=6))
+    # One panel box (prevents per-line bbox collisions)
+    panel = FancyBboxPatch(
+        (0.03, 0.12), 0.94, 0.62,
+        boxstyle="round,pad=0.02",
+        linewidth=1.5, edgecolor="black", facecolor="white", alpha=0.95,
+        transform=ax_txt.transAxes
+    )
+    ax_txt.add_patch(panel)
 
+    c_colors = ["darkgreen" if p > 0.5 else "darkred" for p in cvs_probs[:3]]
 
-def _as_path_or_none(x: Optional[str]) -> Optional[Path]:
-    if x is None: return None
-    x = str(x).strip()
-    if x == "" or x.lower() in ["none", "null"]: return None
-    return Path(x)
+    lines = [
+        f"1. Hepatocystic triangle cleared of all fat and fibrous tissue: {cvs_probs[0]:.0%}",
+        f"2. Lower third of the gallbladder separated from the liver bed: {cvs_probs[1]:.0%}",
+        f"3. Only two structures seen entering the gallbladder (duct and artery): {cvs_probs[2]:.0%}",
+    ]
 
+    # Wrap long lines so they don't run into each other horizontally
+    wrapped = [textwrap.fill(s, width=120) for s in lines]
+
+    # Place from top to bottom with ample spacing
+    y = 0.70
+    dy = 0.22
+    for s, col in zip(wrapped, c_colors):
+        ax_txt.text(
+            0.06, y, s,
+            ha="left", va="top",
+            fontsize=12, fontweight="bold",
+            color=col,
+            transform=ax_txt.transAxes
+        )
+        y -= dy
+
+    # Save without cutting off titles/panels
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved visualization to: {save_path}")
+    plt.show()
 
 # ---------------------------------------------------------
 # Main
 # ---------------------------------------------------------
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--config", type=str, default="config.toml", help="Path to config.toml")
-    p.add_argument("--data_root", default=None)
-    p.add_argument("--split", default=None)
-    p.add_argument("--det_ckpt", default=None)
-    p.add_argument("--det_meta", default=None)
-    p.add_argument("--cvs_ckpt", default=None)
-    p.add_argument("--cvs_meta", default=None)
-    p.add_argument("--metadata_csv", default=None)
-    p.add_argument("--image", default=None)
-    p.add_argument("--pick_annotated", action="store_true")
-    p.add_argument("--score_thr", type=float, default=None)
-    p.add_argument("--save_dir", default=None)
+    p.add_argument("--config", default="predict_one.toml")
     args = p.parse_args()
-
-    cfg_toml = {}
-    if Path(args.config).exists():
-        cfg_toml = load_toml(args.config)
-
-    data_root = Path(args.data_root or deep_get(cfg_toml, "paths.data_root"))
-    split = args.split or deep_get(cfg_toml, "predict.detector.split", "test")
-    split_dir = data_root / split
-    ann_path = split_dir / deep_get(cfg_toml, "predict.detector.ann_name", "annotation_coco.json")
-    csv_path = data_root / (args.metadata_csv or deep_get(cfg_toml, "cvs.data.metadata_csv", "all_metadata.csv"))
-
-    # Configs
-    det_ckpt = args.det_ckpt or deep_get(cfg_toml, "eval.detector.ckpt")
-    det_meta_path = args.det_meta or deep_get(cfg_toml, "eval.detector.meta")
-    cvs_ckpt = args.cvs_ckpt or deep_get(cfg_toml, "eval.cvs.ckpt")
-    cvs_meta_path = args.cvs_meta or deep_get(cfg_toml, "eval.cvs.meta")
     
-    score_thr = args.score_thr if args.score_thr is not None else float(deep_get(cfg_toml, "predict.detector.score_thr", 0.5))
-    save_dir = args.save_dir or deep_get(cfg_toml, "predict.detector.save_dir", "runs/predict_vis")
-
-    # Load Annotations
-    coco = COCO(str(ann_path))
-    cat_ids = sorted(coco.getCatIds())
-    cat_id_to_name = {c["id"]: c["name"] for c in coco.loadCats(cat_ids)}
-    label_to_cat_id = {i + 1: cid for i, cid in enumerate(cat_ids)}
-    class_colors = build_class_color_map(cat_id_to_name)
-
-    # Select Image
-    cfg_image = deep_get(cfg_toml, "predict.detector.image", "")
-    image_arg = args.image if args.image else (cfg_image if str(cfg_image).strip() != "" else None)
-    pick_annotated = args.pick_annotated or bool(deep_get(cfg_toml, "predict.detector.pick_annotated", False))
-
-    if pick_annotated:
-        img_id = int(np.random.choice(coco.getImgIds()))
-        info = coco.loadImgs([img_id])[0]
-        img_path = split_dir / info["file_name"]
+    cfg = load_toml(args.config)
+    data_root = Path(deep_get(cfg, "paths.data_root"))
+    
+    # 1. Image Selection Logic
+    ann_file = data_root / deep_get(cfg, "prediction.annotation_file")
+    if not ann_file.exists(): raise FileNotFoundError(f"Annotation file missing: {ann_file}")
+    
+    coco = COCO(str(ann_file))
+    cats = coco.loadCats(coco.getCatIds())
+    cat_id_to_name = {c["id"]: c["name"] for c in cats}
+    
+    pick_random = deep_get(cfg, "prediction.pick_random", False)
+    
+    if pick_random:
+        # Get all images that actually have annotations (optional filter)
+        img_ids = coco.getImgIds()
+        rand_id = random.choice(img_ids)
+        img_info = coco.loadImgs([rand_id])[0]
+        img_path = data_root / "test" / img_info["file_name"] # Assuming test split, adjust if needed
+        # Fallback if file structure is flat
+        if not img_path.exists(): 
+             img_path = data_root / deep_get(cfg, "prediction.image").split("/")[0] / img_info["file_name"]
     else:
-        if not image_arg: raise RuntimeError("Provide --image or use --pick_annotated")
-        img_path = split_dir / image_arg if not Path(image_arg).exists() else Path(image_arg)
-        if not img_path.exists(): raise FileNotFoundError(f"Image not found: {img_path}")
-        img_id = find_image_id_by_filename(coco, img_path.name)
+        img_path = data_root / deep_get(cfg, "prediction.image")
+    
+    if not img_path.exists():
+         # Last ditch effort: search recursively
+         found = list(data_root.rglob(img_path.name))
+         if found: img_path = found[0]
+         else: raise FileNotFoundError(f"Could not find image: {img_path}")
 
-    print(f"Processing: {img_path}")
+    print(f"\nProcessing Image: {img_path.name}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ---- LOAD DETECTOR ----
-    if det_ckpt:
-        backbone_name = "resnet50"
-        if det_meta_path and Path(det_meta_path).exists():
-            dm = json.loads(Path(det_meta_path).read_text(encoding='utf-8'))
-            backbone_name = dm.get("backbone", "resnet50") # Check meta for resnet101
-        
-        det_model = build_detector_model(len(cat_ids)+1, backbone_name=backbone_name)
-        det_model.load_state_dict(torch.load(det_ckpt, map_location="cpu", weights_only=True))
-        det_model.to(device)
-        det_model.eval()
-    else:
-        raise RuntimeError("No detector checkpoint found.")
+    # 2. Load Models
+    det_meta = json.loads(Path(deep_get(cfg, "prediction.det_meta")).read_text())
+    det_model = build_detector(len(cat_id_to_name)+1, det_meta)
+    det_model.load_state_dict(torch.load(deep_get(cfg, "prediction.det_ckpt"), map_location="cpu", weights_only=True))
+    det_model.to(device).eval()
+    
+    cvs_meta = json.loads(Path(deep_get(cfg, "prediction.cvs_meta")).read_text())
+    cvs_model = build_cvs(cvs_meta)
+    cvs_model.load_state_dict(torch.load(deep_get(cfg, "prediction.cvs_ckpt"), map_location="cpu", weights_only=True))
+    cvs_model.to(device).eval()
 
-    # ---- LOAD CVS ----
-    cvs_model = None
-    cvs_type = "simple"
-    seq_len = 1
-    if cvs_ckpt:
-        if cvs_meta_path and Path(cvs_meta_path).exists():
-            cm = json.loads(Path(cvs_meta_path).read_text(encoding='utf-8'))
-            cvs_type = cm.get("model_type", "simple")
-            seq_len = cm.get("seq_len", 1)
-        
-        cvs_model = build_cvs_model(model_type=cvs_type, out_dim=3)
-        cvs_model.load_state_dict(torch.load(cvs_ckpt, map_location="cpu", weights_only=True))
-        cvs_model.to(device)
-        cvs_model.eval()
-
-    # ---- PREDICT ----
+    # 3. Process Image
     pil_img = Image.open(img_path).convert("RGB")
     
-    # 1. Detector Prediction
-    img_t = T.ToTensor()(pil_img).to(device)
+    # Detector Input
+    det_t = T.ToTensor()(pil_img).to(device)
+    
+    # CVS Input (Handle Normalization)
+    is_tuned_cvs = "baseline" not in cvs_meta.get("model_type", "simple")
+    cvs_tfms = [T.Resize((224, 224)), T.ToTensor()]
+    if is_tuned_cvs:
+        cvs_tfms.append(T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))
+    
+    cvs_t = T.Compose(cvs_tfms)(pil_img).to(device)
+    if "temporal" in cvs_meta.get("model_type", ""):
+        cvs_t = cvs_t.unsqueeze(0).unsqueeze(0).repeat(1, 5, 1, 1, 1)
+    else:
+        cvs_t = cvs_t.unsqueeze(0)
+
+    # 4. Inference
     with torch.no_grad():
-        det_out = det_model([img_t])[0]
+        det_out = det_model([det_t])[0]
+        cvs_logits = cvs_model(cvs_t)
+        if cvs_logits.dim() > 2: cvs_logits = cvs_logits[:, -1, :]
+        cvs_probs = torch.sigmoid(cvs_logits).cpu().squeeze().tolist()
 
-    boxes = det_out["boxes"].cpu()
-    scores = det_out["scores"].cpu()
-    labels = det_out["labels"].cpu()
-    keep = scores >= score_thr
-    pred_boxes = boxes[keep].numpy().tolist()
-    pred_scores = scores[keep].tolist()
-    pred_labels = labels[keep].tolist()
+    # 5. Filter Results
+    det_thr = deep_get(cfg, "prediction.det_thr", 0.5)
+    keep = det_out["scores"] > det_thr
     
-    pred_box_texts = [f"{cat_id_to_name.get(label_to_cat_id.get(int(l)), '?')} {s:.2f}" for l, s in zip(pred_labels, pred_scores)]
-    pred_box_cids = [label_to_cat_id.get(int(l)) for l in pred_labels]
+    final_res = {
+        "boxes": det_out["boxes"][keep].cpu().numpy(),
+        "scores": det_out["scores"][keep].cpu().numpy(),
+        "labels": det_out["labels"][keep].cpu().numpy()
+    }
 
-    # 2. CVS Prediction
-    cvs_pred_str = "CVS Model Not Loaded"
-    if cvs_model:
-        # Preprocess
-        norm = T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        cvs_t = T.Compose([T.Resize((224, 224)), T.ToTensor(), norm])(pil_img).to(device)
-        
-        # Handle Temporal Input
-        if "temporal" in cvs_type or "lstm" in cvs_type:
-            # We only have 1 image, but model needs [B, T, C, H, W]
-            # We replicate the image T times to mimic a static video
-            cvs_input = cvs_t.unsqueeze(0).unsqueeze(0).repeat(1, seq_len, 1, 1, 1) # [1, 5, 3, 224, 224]
-        else:
-            # Simple model [B, C, H, W]
-            cvs_input = cvs_t.unsqueeze(0)
-
-        with torch.no_grad():
-            logits = cvs_model(cvs_input)[0]
-            probs = torch.sigmoid(logits)
-        
-        p = probs.cpu().tolist()
-        preds = [1 if x >= 0.5 else 0 for x in p]
-        cvs_pred_str = f"C1:{preds[0]} ({p[0]:.2f})  C2:{preds[1]} ({p[1]:.2f})  C3:{preds[2]} ({p[2]:.2f})"
-
-    # ---- VISUALIZE ----
-    gt_boxes, gt_box_texts, gt_box_cids = [], [], []
-    if img_id is not None:
-        for a in coco.loadAnns(coco.getAnnIds(imgIds=[img_id])):
-            x, y, w, h = a["bbox"]
-            gt_boxes.append([x, y, x+w, y+h])
-            cid = a["category_id"]
-            gt_box_cids.append(cid)
-            gt_box_texts.append(cat_id_to_name.get(cid, str(cid)))
+    # 6. Generate Text Outputs
+    llm_prompt = generate_llm_text(final_res, cvs_probs, cat_id_to_name)
     
-    gt_cvs_str, _ = get_cvs_gt(img_path.name, csv_path)
-    n_gt, n_pred = len(gt_boxes), len(pred_boxes)
+    print("\n" + "="*60)
+    print(" GENERATED TEXT OUTPUT FOR LLM")
+    print("="*60)
+    print(llm_prompt)
+    print("="*60 + "\n")
 
-    print("\n--- PREDICTION SUMMARY ---")
-    print(f"Image       : {img_path.name}")
-    print(f"Model Det   : {backbone_name if det_ckpt else 'None'}")
-    print(f"Model CVS   : {cvs_type if cvs_ckpt else 'None'}")
-    print(f"GT Boxes    : {n_gt}")
-    print(f"Pred Boxes  : {n_pred} (thr={score_thr})")
-    print(f"GT CVS      : {gt_cvs_str}")
-    print(f"Pred CVS    : {cvs_pred_str}")
-    print("--------------------------")
-
-    save_dir_p = Path(save_dir) if save_dir else None
-    if save_dir_p: save_dir_p.mkdir(parents=True, exist_ok=True)
-
-    fig1 = plt.figure(figsize=(12, 8))
-    plt.imshow(pil_img)
-    ax1 = plt.gca()
-    if gt_boxes: draw_boxes(ax1, gt_boxes, gt_box_texts, gt_box_cids, class_colors, "--")
-    draw_cvs_info(ax1, "GROUND TRUTH", img_path.name, f"CVS: {gt_cvs_str}\nBoxes: {n_gt}", "darkgreen")
-    plt.axis("off"); plt.tight_layout()
-    if save_dir_p: plt.savefig(save_dir_p / f"{img_path.stem}_GT.png", dpi=150, bbox_inches='tight')
-
-    fig2 = plt.figure(figsize=(12, 8))
-    plt.imshow(pil_img)
-    ax2 = plt.gca()
-    if pred_boxes: draw_boxes(ax2, pred_boxes, pred_box_texts, pred_box_cids, class_colors, "-")
-    draw_cvs_info(ax2, "PREDICTION", img_path.name, f"CVS: {cvs_pred_str}\nBoxes: {n_pred}", "darkblue")
-    plt.axis("off"); plt.tight_layout()
-    if save_dir_p: plt.savefig(save_dir_p / f"{img_path.stem}_PRED.png", dpi=150, bbox_inches='tight')
-    print(f"Saved visualizations to: {save_dir_p}")
-    plt.show()
+    # 7. Visualize
+    save_dir = Path(deep_get(cfg, "prediction.save_dir"))
+    save_dir.mkdir(parents=True, exist_ok=True)
+    draw_results(pil_img, final_res, cvs_probs, cat_id_to_name, save_dir / f"pred_{img_path.stem}.png")
 
 if __name__ == "__main__":
     main()

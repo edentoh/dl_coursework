@@ -1,0 +1,28 @@
+[paths]
+data_root = "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes"
+
+[comparison]
+# Image Selection
+image = "194_23925.jpg"  # Optional: specific image name
+pick_annotated = false           # Randomly pick an image with GT boxes? (Overrides 'image')
+split = "test"                  # Folder to look in (train/val/test)
+metadata_csv = "all_metadata.csv"
+
+# Visualization Settings
+score_thr = 0.65   # Detector Confidence Threshold
+cvs_thr = 0.70     # CVS Classification Threshold
+save_dir = "runs/comparison_vis"
+
+[baseline]
+# Path to your "Weak" Models (e.g. 640px detector, no-norm CVS)
+det_ckpt = "runs/detector_baseline_5/detector_best.pth"
+det_meta = "runs/detector_baseline_5/meta.json"
+cvs_ckpt = "runs/cvs_baseline_3/cvs_best.pth"
+cvs_meta = "runs/cvs_baseline_3/meta.json"
+
+[tuned]
+# Path to your "Strong" Models (e.g. 1200px detector, normed CVS)
+det_ckpt = "runs/detector_tuned_r50_highres_11/detector_best.pth"
+det_meta = "runs/detector_tuned_r50_highres_11/meta.json"
+cvs_ckpt = "runs/cvs_tuned_r50_temporal_bi_10/hidden_64/cvs_tuned_best.pth"
+cvs_meta = "runs/cvs_tuned_r50_temporal_bi_10/hidden_64/meta.json"

@@ -1,12 +1,13 @@
 # config_tuned.toml
-# Tuned experiment config for ResNet-101 + Temporal Models
+# Tuned experiment config for ResNet-50 (High-Res & Stable)
 
 [paths]
 data_root = "C:/Users/TUF/COMP0220_Deep_Learning/coursework/endoscapes"
 runs_dir  = "runs"
 
 # ---------------------------------------------------------
-# Detector (Faster R-CNN ResNet-101)
+# Detector (Faster R-CNN ResNet-50)
+# Goal: High Resolution to catch small objects
 # ---------------------------------------------------------
 [detector.data]
 train_split = "train"
@@ -15,24 +16,28 @@ test_split  = "test"
 ann_name    = "annotation_coco.json"
 
 [detector.train]
-epochs       = 50
-batch_size   = 2       # Keep at 2 for ResNet-101 on 8GB VRAM
+epochs       = 20      # ResNet-50 converges faster than 101
+batch_size   = 4       # Increased to 4 for stability (fits in 8GB with R50)
 num_workers  = 4
-lr           = 0.003
+lr           = 0.008
 weight_decay = 0.0005
+milestones   = [12, 18]
 momentum     = 0.9
 amp          = true
 freeze_backbone = false
 seed         = 42
-out_dir      = "runs/detector_tuned_r101_2"
+out_dir      = "runs/detector_tuned_r50_highres_12"
 
 [detector.model]
-# Higher resolution helps small tool detection
-img_min_size = 850
-img_max_size = 1333
+# Massive resolution boost to detect small arteries/ducts
+# (Possible because R50 is 40% smaller than R101)
+backbone = "resnet50"
+img_min_size = 720
+img_max_size = 1600
 
 # ---------------------------------------------------------
-# CVS Classifier (Temporal ResNet-101 + LSTM)
+# CVS Classifier (Temporal ResNet-50 + LSTM)
+# Goal: Stability (Batch Size) + Clarity (Resolution)
 # ---------------------------------------------------------
 [cvs.data]
 metadata_csv = "all_metadata.csv"
@@ -40,50 +45,47 @@ train_split  = "train"
 val_split    = "val"
 filename_pattern = "{vid}_{frame}"
 keyframes_only   = true
-seq_len          = 5   # NEW: Required for Temporal Model (5 frames context)
+seq_len          = 5  
 
 [cvs.train]
-epochs       = 40      # Temporal training is slower; 25 is usually sufficient
-batch_size   = 8       # CRITICAL: Lowered to 8 to fit ResNet-101+LSTM in 8GB VRAM
+epochs       = 20
+batch_size   = 16      # CRITICAL: Increased to 16 for resent50 or 8 for resent101
 num_workers  = 4
-lr           = 0.00005  # Lower LR for fine-tuning deep backbone
-weight_decay = 0.001
+lr           = 0.0001
+weight_decay = 0.05   # Stronger regularization to prevent overfitting
 amp          = true
 freeze_backbone = false
 seed         = 42
-image_size   = 224
-out_dir      = "runs/cvs_tuned_temporal_2"
+image_size   = 268     # Increased resolution (224 -> 320) for better detail
+out_dir      = "runs/cvs_tuned_r50_temporal_bi_10"
 
 # ---------------------------------------------------------
-# Evaluate settings (Points to new tuned folders)
+# Evaluate settings (Points to new folders)
 # ---------------------------------------------------------
 [eval.detector]
 split = "test"
-ckpt  = "runs/detector_tuned_r101_2/detector_tuned_best.pth"
-meta  = "runs/detector_tuned_r101_2/meta.json"
+ckpt  = "runs/detector_tuned_r50_highres_12/detector_best.pth"
+meta  = "runs/detector_tuned_r50_highres_12/meta.json"
 ann_name    = "annotation_coco.json"
 batch_size  = 2
 num_workers = 4
 
 [eval.cvs]
 split = "test"
-ckpt  = "runs/cvs_tuned_temporal_2/cvs_tuned_best.pth"
-meta  = "runs/cvs_tuned_temporal_2/meta.json"
-batch_size  = 8
+ckpt  = "runs/cvs_tuned_r50_temporal_bi_10/hidden_64/cvs_tuned_best.pth"
+meta  = "runs/cvs_tuned_r50_temporal_bi_10/hidden_64/meta.json"
+batch_size  = 10
 num_workers = 4
-threshold = 0.65
+threshold = 0.70  # Start stricter for high precision
 
 [predict.detector]
 # which split/folder to read images from
 split = "test"
 ann_name = "annotation_coco.json"
 
-# if image is empty AND pick_annotated=false, script will error
-image = ""   
-
 # if true, it will randomly pick an image id that exists in COCO annotations
 pick_annotated = true
 
 # prediction display filtering
-score_thr = 0.75
+score_thr = 0.65
 topk = 50

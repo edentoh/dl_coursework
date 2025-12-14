@@ -15,19 +15,21 @@ ann_name    = "annotation_coco.json"
 
 [detector.train]
 epochs      = 15
-batch_size  = 2
+batch_size  = 8
 num_workers = 4
-lr          = 0.01
-weight_decay = 0.0001
+lr          = 0.001
+weight_decay = 0.0005
 momentum     = 0.9
 amp         = true
 freeze_backbone = false
 seed        = 42
-out_dir = "runs/detector_baseline2"
+out_dir = "runs/detector_baseline_5"
 
 [detector.model]
-img_min_size = 640
-img_max_size = 1024
+img_min_size = 440
+img_max_size = 840
+backbone = "resnet50"
+
 
 # -------------------------
 # CVS Classifier
@@ -42,35 +44,35 @@ filename_pattern = "{vid}_{frame}"
 keyframes_only   = true
 
 [cvs.train]
-epochs      = 15
+epochs      = 20
 batch_size  = 32
 num_workers = 4
-lr          = 0.001
-weight_decay = 0.0001
+lr          = 0.0001
+weight_decay = 0.001
 amp         = true
 freeze_backbone = false
 seed        = 42
-image_size  = 224
-out_dir = "runs/cvs_baseline2"
+image_size  = 144
+out_dir = "runs/cvs_baseline_3"
 
 # -------------------------
 # Evaluate settings (optional)
 # -------------------------
 [eval.detector]
 split = "test"
-ckpt = "runs/detector_baseline/detector_best.pth"
-meta = "runs/detector_baseline/meta.json"
+ckpt = "runs/detector_baseline_5/detector_best.pth"
+meta = "runs/detector_baseline_5/meta.json"
 ann_name = "annotation_coco.json"
 batch_size = 2
 num_workers = 4
 
 [eval.cvs]
 split = "test"
-ckpt = "runs/cvs_baseline/cvs_best.pth"
-meta = "runs/cvs_baseline/meta.json"
+ckpt = "runs/cvs_baseline_3/cvs_best.pth"
+meta = "runs/cvs_baseline_3/meta.json"
 batch_size = 32
 num_workers = 4
-threshold = 0.75
+threshold = 0.7
 
 [predict.detector]
 # which split/folder to read images from
@@ -85,7 +87,7 @@ image = ""   # example: "166_13700.jpg" or "C:/.../endoscapes/test/166_13700.jpg
 pick_annotated = true
 
 # prediction display filtering
-score_thr = 0.7
+score_thr = 0.65
 topk = 50
 
 # optional: save GT and prediction figures

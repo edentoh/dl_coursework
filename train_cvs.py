@@ -1,9 +1,9 @@
 import argparse
 import json
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 import numpy as np
 import pandas as pd
@@ -20,7 +20,8 @@ def seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 @dataclass
@@ -44,10 +45,10 @@ class Cfg:
     filename_pattern: str
     threshold: float
     config_path: str
+    pos_weight: List[float]
 
 
 def build_existing_file_index(split_dir: Path) -> Dict[str, str]:
-    """key: lowercase stem or lowercase full name -> actual filename"""
     files = list(split_dir.glob("*.jpg")) + list(split_dir.glob("*.jpeg")) + list(split_dir.glob("*.png"))
     idx: Dict[str, str] = {}
     for f in files:
@@ -70,7 +71,6 @@ def map_row_to_existing_filename(row: pd.Series, existing_idx: Dict[str, str], p
     if key in existing_idx:
         return existing_idx[key]
 
-    # handle float-like "13700.0"
     try:
         stem2 = make_stem(pattern, int(float(row["vid"])), int(float(row["frame"]))).strip()
         key2 = stem2.lower()
@@ -83,12 +83,6 @@ def map_row_to_existing_filename(row: pd.Series, existing_idx: Dict[str, str], p
 
 
 class EndoscapesCVSDataset(Dataset):
-    """
-    CVS dataset from all_metadata.csv that contains columns:
-      vid, frame, C1, C2, C3, is_ds_keyframe (optional filter)
-    Images assumed like: {vid}_{frame}.jpg (pattern controls stem)
-    """
-
     def __init__(self, split_dir: Path, df: pd.DataFrame, image_size: int, train: bool, pattern: str):
         self.split_dir = split_dir
         self.pattern = pattern
@@ -109,21 +103,17 @@ class EndoscapesCVSDataset(Dataset):
         self.labels = df[["C1", "C2", "C3"]].astype(float).values
 
         if train:
-            self.tfms = T.Compose(
-                [
-                    T.Resize((image_size, image_size)),
-                    T.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.08, hue=0.02),
-                    T.RandomHorizontalFlip(p=0.5),
-                    T.ToTensor(),
-                ]
-            )
+            self.tfms = T.Compose([
+                T.Resize((image_size, image_size)),
+                T.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.08, hue=0.02),
+                T.RandomHorizontalFlip(p=0.5),
+                T.ToTensor(),
+            ])
         else:
-            self.tfms = T.Compose(
-                [
-                    T.Resize((image_size, image_size)),
-                    T.ToTensor(),
-                ]
-            )
+            self.tfms = T.Compose([
+                T.Resize((image_size, image_size)),
+                T.ToTensor(),
+            ])
 
     def __len__(self):
         return len(self.files)
@@ -141,7 +131,6 @@ def build_model(out_dim: int = 3, freeze_backbone: bool = False):
 
     try:
         from torchvision.models import ResNet50_Weights
-
         weights = ResNet50_Weights.DEFAULT
     except Exception:
         weights = "DEFAULT"
@@ -151,6 +140,8 @@ def build_model(out_dim: int = 3, freeze_backbone: bool = False):
         for name, p in model.named_parameters():
             if not name.startswith("fc."):
                 p.requires_grad = False
+    
+    # Standard ResNet50 head replacement
     model.fc = nn.Linear(model.fc.in_features, out_dim)
     return model
 
@@ -223,59 +214,40 @@ def evaluate(model, loader, device, loss_fn, threshold: float):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=str, default="config.toml")
-
-    # overrides
-    p.add_argument("--data_root", type=str, default=None)
-    p.add_argument("--metadata_csv", type=str, default=None)
-    p.add_argument("--train_split", type=str, default=None)
-    p.add_argument("--val_split", type=str, default=None)
-    p.add_argument("--out_dir", type=str, default=None)
-    p.add_argument("--epochs", type=int, default=None)
-    p.add_argument("--batch_size", type=int, default=None)
-    p.add_argument("--num_workers", type=int, default=None)
-    p.add_argument("--lr", type=float, default=None)
-    p.add_argument("--weight_decay", type=float, default=None)
-    p.add_argument("--seed", type=int, default=None)
-    p.add_argument("--image_size", type=int, default=None)
-    p.add_argument("--filename_pattern", type=str, default=None)
-    p.add_argument("--threshold", type=float, default=None)
-
-    # flags
-    p.add_argument("--amp", action="store_true")
-    p.add_argument("--freeze_backbone", action="store_true")
-    p.add_argument("--keyframes_only", action="store_true")
-
-    args = p.parse_args()
+    args, unknown = p.parse_known_args()
 
     cfg_toml = {}
     cfg_path = Path(args.config)
     if cfg_path.exists():
         cfg_toml = load_toml(cfg_path)
 
-    data_root = args.data_root or deep_get(cfg_toml, "paths.data_root", None)
+    data_root = deep_get(cfg_toml, "paths.data_root", None)
     if data_root is None:
         raise RuntimeError("Missing data_root. Provide --data_root or set [paths].data_root in config.toml")
 
-    metadata_csv_name = args.metadata_csv or deep_get(cfg_toml, "cvs.data.metadata_csv", "all_metadata.csv")
-    train_split = args.train_split or deep_get(cfg_toml, "cvs.data.train_split", "train")
-    val_split = args.val_split or deep_get(cfg_toml, "cvs.data.val_split", "val")
-    out_dir = args.out_dir or deep_get(cfg_toml, "cvs.train.out_dir", "runs/cvs")
+    # Load from config or set defaults
+    metadata_csv_name = deep_get(cfg_toml, "cvs.data.metadata_csv", "all_metadata.csv")
+    train_split = deep_get(cfg_toml, "cvs.data.train_split", "train")
+    val_split = deep_get(cfg_toml, "cvs.data.val_split", "val")
+    out_dir = deep_get(cfg_toml, "cvs.train.out_dir", "runs/cvs_baseline")
 
-    filename_pattern = args.filename_pattern or deep_get(cfg_toml, "cvs.data.filename_pattern", "{vid}_{frame}")
-    keyframes_only_cfg = bool(deep_get(cfg_toml, "cvs.data.keyframes_only", False))
-    keyframes_only = bool(args.keyframes_only) or keyframes_only_cfg
+    filename_pattern = deep_get(cfg_toml, "cvs.data.filename_pattern", "{vid}_{frame}")
+    keyframes_only = bool(deep_get(cfg_toml, "cvs.data.keyframes_only", False))
 
-    epochs = args.epochs if args.epochs is not None else int(deep_get(cfg_toml, "cvs.train.epochs", 15))
-    batch_size = args.batch_size if args.batch_size is not None else int(deep_get(cfg_toml, "cvs.train.batch_size", 32))
-    num_workers = args.num_workers if args.num_workers is not None else int(deep_get(cfg_toml, "cvs.train.num_workers", 4))
-    lr = args.lr if args.lr is not None else float(deep_get(cfg_toml, "cvs.train.lr", 3e-4))
-    weight_decay = args.weight_decay if args.weight_decay is not None else float(deep_get(cfg_toml, "cvs.train.weight_decay", 1e-4))
-    seed = args.seed if args.seed is not None else int(deep_get(cfg_toml, "cvs.train.seed", 42))
-    image_size = args.image_size if args.image_size is not None else int(deep_get(cfg_toml, "cvs.train.image_size", 224))
-    threshold = args.threshold if args.threshold is not None else float(deep_get(cfg_toml, "eval.cvs.threshold", 0.5))
+    epochs = int(deep_get(cfg_toml, "cvs.train.epochs", 15))
+    batch_size = int(deep_get(cfg_toml, "cvs.train.batch_size", 32))
+    num_workers = int(deep_get(cfg_toml, "cvs.train.num_workers", 4))
+    lr = float(deep_get(cfg_toml, "cvs.train.lr", 3e-4))
+    weight_decay = float(deep_get(cfg_toml, "cvs.train.weight_decay", 1e-4))
+    seed = int(deep_get(cfg_toml, "cvs.train.seed", 42))
+    image_size = int(deep_get(cfg_toml, "cvs.train.image_size", 224))
+    threshold = float(deep_get(cfg_toml, "eval.cvs.threshold", 0.5))
+    
+    # NEW: Load pos_weight from config (or default to None)
+    pos_weight_cfg = deep_get(cfg_toml, "cvs.train.pos_weight", None)
 
-    amp = bool(args.amp) or bool(deep_get(cfg_toml, "cvs.train.amp", False))
-    freeze_backbone = bool(args.freeze_backbone) or bool(deep_get(cfg_toml, "cvs.train.freeze_backbone", False))
+    amp = bool(deep_get(cfg_toml, "cvs.train.amp", False))
+    freeze_backbone = bool(deep_get(cfg_toml, "cvs.train.freeze_backbone", False))
 
     cfg = Cfg(
         data_root=Path(data_root),
@@ -297,6 +269,7 @@ def main():
         filename_pattern=filename_pattern,
         threshold=threshold,
         config_path=str(cfg_path),
+        pos_weight=pos_weight_cfg
     )
 
     seed_everything(cfg.seed)
@@ -306,10 +279,6 @@ def main():
         raise FileNotFoundError(f"Missing {cfg.metadata_csv}")
 
     df = pd.read_csv(cfg.metadata_csv)
-    for col in ["vid", "frame", "C1", "C2", "C3"]:
-        if col not in df.columns:
-            raise RuntimeError(f"CSV missing '{col}'. Columns found: {list(df.columns)}")
-
     if cfg.keyframes_only:
         if "is_ds_keyframe" not in df.columns:
             raise RuntimeError("You used keyframes_only but CSV has no 'is_ds_keyframe' column.")
@@ -318,102 +287,107 @@ def main():
     train_dir = cfg.data_root / cfg.train_split
     val_dir = cfg.data_root / cfg.val_split
 
+    print("Initializing Datasets...")
     train_ds = EndoscapesCVSDataset(train_dir, df, cfg.image_size, train=True, pattern=cfg.filename_pattern)
     val_ds = EndoscapesCVSDataset(val_dir, df, cfg.image_size, train=False, pattern=cfg.filename_pattern)
 
-    if len(train_ds) == 0:
-        existing = sorted([p.name for p in (list(train_dir.glob("*.jpg")) + list(train_dir.glob("*.png")))])[:10]
-        sample_rows = df[["vid", "frame"]].head(10).to_dict("records")
-        sample_stems = [cfg.filename_pattern.format(vid=r["vid"], frame=r["frame"]) for r in sample_rows]
-        raise RuntimeError(
-            "No CVS rows matched your TRAIN folder.\n\n"
-            f"Train folder: {train_dir}\n"
-            f"Pattern used: {cfg.filename_pattern}  (expects files like: {cfg.filename_pattern}.jpg)\n"
-            f"Example train images: {existing}\n"
-            f"Example generated stems from CSV: {sample_stems}\n"
-        )
-
-    # Print split stats
-    def stats(name, ds: EndoscapesCVSDataset):
-        y = ds.labels
-        pos = (y >= 0.5).sum(axis=0)
-        print(f"{name}: n={len(ds)} | positives [C1,C2,C3]={pos.tolist()}")
-
-    stats("TRAIN", train_ds)
-    stats("VAL  ", val_ds)
+    print(f"Train: {len(train_ds)} | Val: {len(val_ds)}")
 
     model = build_model(out_dim=3, freeze_backbone=cfg.freeze_backbone)
     device = torch.device(cfg.device)
     model.to(device)
 
-    # imbalance weights from training
-    y_train = torch.tensor(train_ds.labels, dtype=torch.float32)
-    y_bin = (y_train >= 0.5).float()
-    pos = y_bin.sum(dim=0)
-    neg = y_bin.shape[0] - pos
-    pos_weight = (neg / (pos + 1e-8)).clamp(1.0, 50.0).to(device)
+    # Handle Class Imbalance / Pos Weight
+    if cfg.pos_weight:
+        # Use config weights if provided
+        print(f"Using manual pos_weight: {cfg.pos_weight}")
+        pos_weight = torch.tensor(cfg.pos_weight, dtype=torch.float32).to(device)
+    else:
+        # Auto-calculate weights from training data
+        print("Auto-calculating pos_weight from training data...")
+        y_train = torch.tensor(train_ds.labels, dtype=torch.float32)
+        y_bin = (y_train >= 0.5).float()
+        pos = y_bin.sum(dim=0)
+        neg = y_bin.shape[0] - pos
+        pos_weight = (neg / (pos + 1e-8)).clamp(1.0, 50.0).to(device)
+        print(f"Auto pos_weight: {pos_weight.tolist()}")
 
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=cfg.lr, weight_decay=cfg.weight_decay)
+    
+    # Added basic scheduler for parity
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(cfg.epochs*0.7), gamma=0.1) 
+    
     scaler = torch.amp.GradScaler("cuda") if (cfg.amp and cfg.device == "cuda") else None
 
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers, pin_memory=True)
 
     best_f1 = -1.0
+    
+    # Init history file
+    (cfg.out_dir / "history.jsonl").write_text("", encoding="utf-8")
+
+    print("Starting training...")
 
     for epoch in range(1, cfg.epochs + 1):
         tr_loss = train_one_epoch(model, train_loader, optimizer, device, scaler, loss_fn)
+        scheduler.step() # Step scheduler
+        curr_lr = optimizer.param_groups[0]["lr"]
+        
         va_loss, macro_f1, per = evaluate(model, val_loader, device, loss_fn, threshold=cfg.threshold)
 
-        row = {"epoch": epoch, "train_loss": tr_loss, "val_loss": va_loss, "val_macro_f1": macro_f1, "per_criterion": per}
-        print(json.dumps(row))
-
+        row = {
+            "epoch": epoch, 
+            "train_loss": tr_loss, 
+            "val_loss": va_loss, 
+            "val_macro_f1": macro_f1, 
+            "lr": curr_lr
+        }
+        
         # neat print
-        print(
-            f"\nEpoch {epoch:03d} | train_loss={tr_loss:.4f} | val_loss={va_loss:.4f} | macroF1={macro_f1:.4f} (thr={cfg.threshold})"
-        )
-        for name, d in zip(["C1", "C2", "C3"], per):
-            print(
-                f"  {name}: P={d['precision']:.3f} R={d['recall']:.3f} F1={d['f1']:.3f} "
-                f"(TP={d['tp']} FP={d['fp']} FN={d['fn']})"
-            )
-        print("")
+        print(f"Epoch {epoch:03d} | Loss: {tr_loss:.4f} | Val F1: {macro_f1:.4f} | LR: {curr_lr:.6f}")
 
+        # Save Checkpoints
         torch.save(model.state_dict(), cfg.out_dir / "cvs_last.pth")
         if macro_f1 > best_f1:
             best_f1 = macro_f1
             torch.save(model.state_dict(), cfg.out_dir / "cvs_best.pth")
+            
+            # --- FULL META SAVING (Inside loop) ---
+            meta = {
+                "config_path": cfg.config_path,
+                "data_root": str(cfg.data_root),
+                "metadata_csv": cfg.metadata_csv.name,
+                "out_dir": str(cfg.out_dir),
+                
+                "image_size": cfg.image_size,
+                "filename_pattern": cfg.filename_pattern,
+                "keyframes_only": cfg.keyframes_only,
+                
+                "backbone": "resnet50",
+                "model_type": "baseline_cnn",
+                "freeze_backbone": cfg.freeze_backbone,
+                
+                "epochs": cfg.epochs,
+                "batch_size": cfg.batch_size,
+                "lr": cfg.lr,
+                "weight_decay": cfg.weight_decay,
+                "optimizer": "AdamW",
+                "pos_weight": pos_weight.detach().cpu().tolist(),
+                "scheduler": "StepLR",
+                "amp": cfg.amp,
+                "seed": cfg.seed,
+                
+                "best_val_macro_f1": float(best_f1),
+            }
+            (cfg.out_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         with open(cfg.out_dir / "history.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
 
-    meta = {
-        "config_path": cfg.config_path,
-        "data_root": str(cfg.data_root),
-        "metadata_csv": cfg.metadata_csv.name,
-        "train_split": cfg.train_split,
-        "val_split": cfg.val_split,
-        "out_dir": str(cfg.out_dir),
-        "epochs": cfg.epochs,
-        "batch_size": cfg.batch_size,
-        "num_workers": cfg.num_workers,
-        "lr": cfg.lr,
-        "weight_decay": cfg.weight_decay,
-        "amp": cfg.amp,
-        "freeze_backbone": cfg.freeze_backbone,
-        "seed": cfg.seed,
-        "image_size": cfg.image_size,
-        "filename_pattern": cfg.filename_pattern,
-        "keyframes_only": cfg.keyframes_only,
-        "threshold": cfg.threshold,
-        "label_cols": ["C1", "C2", "C3"],
-        "id_cols": ["vid", "frame"],
-        "pos_weight": pos_weight.detach().cpu().tolist(),
-        "best_val_macro_f1": float(best_f1),
-    }
-    (cfg.out_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"Done. Best val macro-F1: {best_f1:.4f}")
+    print(f"Saved detailed meta.json to {cfg.out_dir}")
 
 
 if __name__ == "__main__":

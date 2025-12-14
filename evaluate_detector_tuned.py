@@ -1,7 +1,7 @@
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
@@ -9,10 +9,10 @@ from PIL import Image
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from torch.utils.data import DataLoader, Dataset
-from torchvision.ops import box_convert
-from torchvision.models.detection import FasterRCNN, fasterrcnn_resnet50_fpn
+from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN
 from torchvision.models.detection.backbone_utils import resnet_fpn_backbone
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+from torchvision.models.detection.rpn import AnchorGenerator
 
 from config_utils import load_toml, deep_get
 
@@ -46,13 +46,23 @@ def sanitize_target_xyxy(target: Dict[str, Any], image_w: int, image_h: int, min
     return target
 
 class EndoscapesCocoDetection(Dataset):
-    def __init__(self, images_dir: Path, ann_path: Path):
+    def __init__(self, images_dir: Path, ann_path: Path, fixed_label_map: Optional[Dict] = None):
         self.images_dir = images_dir
         self.coco = COCO(str(ann_path))
         self.img_ids = sorted(self.coco.getImgIds())
-        cat_ids = sorted(self.coco.getCatIds())
-        self.cat_id_to_label = {cat_id: i + 1 for i, cat_id in enumerate(cat_ids)}
-        self.label_to_cat_id = {v: k for k, v in self.cat_id_to_label.items()}
+        
+        # --- FIX: FORCE CONSISTENT MAPPING ---
+        if fixed_label_map:
+            # Reconstruct map from meta.json (keys are usually strings in JSON)
+            self.cat_id_to_label = {int(k): int(v) for k, v in fixed_label_map.items()}
+            self.label_to_cat_id = {v: k for k, v in self.cat_id_to_label.items()}
+            print(f"Loaded Fixed Label Map (Size {len(self.cat_id_to_label)})")
+        else:
+            # Fallback (Dangerous for Test sets)
+            print("WARNING: Auto-generating label map. This may cause ID mismatches on Test sets!")
+            cat_ids = sorted(self.coco.getCatIds())
+            self.cat_id_to_label = {cat_id: i + 1 for i, cat_id in enumerate(cat_ids)}
+            self.label_to_cat_id = {v: k for k, v in self.cat_id_to_label.items()}
 
     def __len__(self): return len(self.img_ids)
 
@@ -69,8 +79,14 @@ class EndoscapesCocoDetection(Dataset):
         for a in anns:
             x, y, w, h = a["bbox"]
             if w <= 0 or h <= 0: continue
+            
+            # Use strict mapping check
+            cat_id = a["category_id"]
+            if cat_id not in self.cat_id_to_label:
+                continue # Skip unknown classes (unlikely in Test, but safe)
+                
             boxes.append([x, y, w, h])
-            labels.append(self.cat_id_to_label[a["category_id"]])
+            labels.append(self.cat_id_to_label[cat_id])
             areas.append(float(a.get("area", w * h)))
             iscrowd.append(int(a.get("iscrowd", 0)))
 
@@ -90,16 +106,41 @@ class EndoscapesCocoDetection(Dataset):
         target = sanitize_target_xyxy(target, W, H)
         return img_t, target
 
-def build_model(num_classes: int, backbone_name: str, min_size: int, max_size: int):
-    if backbone_name == "resnet101":
-        print("Loading Faster R-CNN with ResNet-101 backbone...")
-        backbone = resnet_fpn_backbone(backbone_name='resnet101', weights=None) # Weights loaded from ckpt
-        model = FasterRCNN(backbone, num_classes=num_classes, min_size=min_size, max_size=max_size)
-    else:
-        print("Loading Faster R-CNN with ResNet-50 backbone...")
-        model = fasterrcnn_resnet50_fpn(weights=None, min_size=min_size, max_size=max_size)
-        in_features = model.roi_heads.box_predictor.cls_score.in_features
-        model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
+def build_model_from_meta(num_classes: int, train_meta: Dict):
+    backbone_name = train_meta.get("backbone", "resnet50")
+    min_size = int(train_meta.get("img_min_size", 800))
+    max_size = int(train_meta.get("img_max_size", 1333))
+    
+    print(f"Building Model: {backbone_name} | Min: {min_size} Max: {max_size}")
+
+    anchor_sizes = train_meta.get("anchor_sizes", None)
+    aspect_ratios = train_meta.get("aspect_ratios", None)
+    rpn_anchor_generator = None
+    
+    if anchor_sizes is not None and aspect_ratios is not None:
+        print(f"-> Restoring Custom Anchors: {anchor_sizes}")
+        if isinstance(anchor_sizes[0], (int, float)):
+             anchor_sizes = tuple((s,) for s in anchor_sizes)
+        else:
+             anchor_sizes = tuple(tuple(s) for s in anchor_sizes)
+        if isinstance(aspect_ratios[0], (int, float)):
+             aspect_ratios = tuple((r,) for r in aspect_ratios)
+        else:
+             aspect_ratios = tuple(tuple(r) for r in aspect_ratios)
+        rpn_anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
+
+    if "resnet101" in backbone_name:
+        backbone = resnet_fpn_backbone(backbone_name='resnet101', weights=None)
+        model = FasterRCNN(backbone, num_classes=num_classes, 
+                           min_size=min_size, max_size=max_size,
+                           rpn_anchor_generator=rpn_anchor_generator)
+        return model
+
+    model = fasterrcnn_resnet50_fpn(weights=None, min_size=min_size, max_size=max_size,
+                                    rpn_anchor_generator=rpn_anchor_generator)
+    
+    in_features = model.roi_heads.box_predictor.cls_score.in_features
+    model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
     return model
 
 @torch.no_grad()
@@ -117,64 +158,108 @@ def coco_eval_map(model, dataset, device, batch_size, num_workers):
             boxes = out["boxes"].cpu()
             scores = out["scores"].cpu()
             labels = out["labels"].cpu()
-            
-            # XYXY -> XYWH
             boxes[:, 2] -= boxes[:, 0]
             boxes[:, 3] -= boxes[:, 1]
             
             for b, s, l in zip(boxes.tolist(), scores.tolist(), labels.tolist()):
+                # Use label_to_cat_id to reverse the model's prediction back to COCO ID
                 cat_id = dataset.label_to_cat_id.get(int(l))
                 if cat_id:
                     results.append({"image_id": img_id, "category_id": cat_id, "bbox": b, "score": s})
     
-    if not results: return {"map": 0.0}
+    if not results: return {"map": 0.0, "stats": []}
     
-    # Fix for pycocotools crash
-    if "info" not in dataset.coco.dataset:
-        dataset.coco.dataset["info"] = {"description": "Endoscapes"}
-    if "licenses" not in dataset.coco.dataset:
-        dataset.coco.dataset["licenses"] = []
+    if "info" not in dataset.coco.dataset: dataset.coco.dataset["info"] = {"description": "Endoscapes"}
+    if "licenses" not in dataset.coco.dataset: dataset.coco.dataset["licenses"] = []
 
     coco_dt = dataset.coco.loadRes(results)
     coco_eval = COCOeval(dataset.coco, coco_dt, "bbox")
     coco_eval.evaluate()
     coco_eval.accumulate()
     coco_eval.summarize()
-    return {"map": float(coco_eval.stats[0])}
+    
+    return {
+        "map": float(coco_eval.stats[0]),
+        "map_50": float(coco_eval.stats[1]),
+        "map_75": float(coco_eval.stats[2]),
+        "map_small": float(coco_eval.stats[3]),
+        "map_medium": float(coco_eval.stats[4]),
+        "map_large": float(coco_eval.stats[5])
+    }
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=str, default="config_tuned.toml")
+    p.add_argument("--save_path", type=str, default=None)
     args = p.parse_args()
 
     cfg = load_toml(args.config)
     data_root = Path(deep_get(cfg, "paths.data_root"))
     
-    # Config values
     split = deep_get(cfg, "eval.detector.split", "test")
     ann_name = deep_get(cfg, "eval.detector.ann_name", "annotation_coco.json")
     ckpt = deep_get(cfg, "eval.detector.ckpt")
     meta_path = deep_get(cfg, "eval.detector.meta")
     
-    if ckpt is None or meta_path is None:
-        raise RuntimeError("Missing ckpt or meta in [eval.detector]")
-
-    # Load Meta to find backbone
-    meta = json.loads(Path(meta_path).read_text(encoding="utf-8"))
-    backbone = meta.get("backbone", "resnet50")
-    min_size = int(meta.get("img_min_size", 800))
-    max_size = int(meta.get("img_max_size", 1333))
-
-    ds = EndoscapesCocoDetection(data_root / split, data_root / split / ann_name)
+    print(f"Loading metadata from: {meta_path}")
+    train_meta = json.loads(Path(meta_path).read_text(encoding="utf-8"))
+    
+    # --- CRITICAL FIX: Extract Label Map from Training Meta ---
+    # JSON stores keys as strings "1": 1. We must convert them if needed.
+    fixed_map = train_meta.get("cat_id_to_label", None)
+    
+    # Pass fixed_map to Dataset so it matches training EXACTLY
+    ds = EndoscapesCocoDetection(
+        data_root / split, 
+        data_root / split / ann_name,
+        fixed_label_map=fixed_map 
+    )
+    
+    # Use num_classes from the Dataset (which now matches Training)
     num_classes = len(ds.cat_id_to_label) + 1
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = build_model(num_classes, backbone, min_size, max_size)
-    model.load_state_dict(torch.load(ckpt, map_location="cpu"))
+    model = build_model_from_meta(num_classes, train_meta)
+    
+    print(f"Loading checkpoint: {ckpt}")
+    model.load_state_dict(torch.load(ckpt, map_location="cpu", weights_only=True))
     model.to(device)
     
-    metrics = coco_eval_map(model, ds, device, batch_size=2, num_workers=4)
-    print(json.dumps({"split": split, "backbone": backbone, "map": metrics["map"]}, indent=2))
+    batch_size = int(deep_get(cfg, "eval.detector.batch_size", 2))
+    metrics = coco_eval_map(model, ds, device, batch_size=batch_size, num_workers=2)
+    
+    result = {
+        "eval_split": split,
+        "eval_map": metrics["map"],
+        "eval_map_50": metrics["map_50"],
+        "eval_map_75": metrics["map_75"],
+        "eval_map_small": metrics["map_small"],
+        "eval_map_medium": metrics["map_medium"],
+        "eval_map_large": metrics["map_large"],
+        "eval_checkpoint": ckpt,
+        "training_meta": train_meta
+    }
+
+    print("-" * 40)
+    print(f"Eval Split: {split} | Backbone: {train_meta.get('backbone')}")
+    print(f"mAP (0.5:0.95): {metrics['map']:.4f}")
+    print(f"mAP (Small):    {metrics['map_small']:.4f}")
+    print("-" * 40)
+
+    if args.save_path:
+        sp = Path(args.save_path)
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        history = []
+        if sp.exists():
+            try:
+                history = json.loads(sp.read_text(encoding="utf-8"))
+                if not isinstance(history, list): history = [history]
+            except: history = []
+        history.append(result)
+        with open(sp, "w", encoding="utf-8") as f: json.dump(history, f, indent=2)
+        print(f"Result appended to: {sp}")
+    else:
+        print(json.dumps(result, indent=2))
 
 if __name__ == "__main__":
     main()
