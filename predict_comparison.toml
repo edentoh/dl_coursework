@@ -3,7 +3,7 @@ data_root = "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes"
 
 [comparison]
 # Image Selection
-image = "194_23925.jpg"  # Optional: specific image name
+image = "173_24350.jpg"  # Optional: specific image name
 pick_annotated = false           # Randomly pick an image with GT boxes? (Overrides 'image')
 split = "test"                  # Folder to look in (train/val/test)
 metadata_csv = "all_metadata.csv"

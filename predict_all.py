@@ -341,7 +341,7 @@ def main():
     axes[1].imshow(pil_img)
     if "boxes" in base_res and base_res["boxes"]:
         draw_boxes(axes[1], base_res["boxes"][0], base_res["boxes"][1], base_res["boxes"][2], class_colors, "-")
-    axes[1].set_title("BASELINE MODEL", fontsize=14, fontweight='bold', pad=10)
+    axes[1].set_title("BASELINE MODEL\n(No Jitter / Low Res)", fontsize=14, fontweight='bold', pad=10)
     axes[1].set_xlabel(f"PRED CVS:\n{base_res['cvs_str']}", fontsize=13, fontweight='bold', color='darkblue')
     axes[1].set_xticks([]); axes[1].set_yticks([])
 
@@ -349,7 +349,7 @@ def main():
     axes[2].imshow(pil_img)
     if "boxes" in tuned_res and tuned_res["boxes"]:
         draw_boxes(axes[2], tuned_res["boxes"][0], tuned_res["boxes"][1], tuned_res["boxes"][2], class_colors, "-")
-    axes[2].set_title("TUNED MODEL", fontsize=14, fontweight='bold', pad=10)
+    axes[2].set_title("TUNED MODEL\n(Augmented / High Res)", fontsize=14, fontweight='bold', pad=10)
     axes[2].set_xlabel(f"PRED CVS:\n{tuned_res['cvs_str']}", fontsize=13, fontweight='bold', color='purple')
     axes[2].set_xticks([]); axes[2].set_yticks([])
 

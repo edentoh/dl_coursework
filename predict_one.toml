@@ -5,9 +5,9 @@ data_root = "C:\\Users\\TUF\\COMP0220_Deep_Learning\\coursework\\endoscapes"
 [prediction]
 # --- Image Selection ---
 # If true, it ignores 'image' and picks a random one from the annotation file
-pick_random = true
+pick_random = false
 # If pick_random is false, it uses this specific file
-image = "test/video_01_00500.jpg"
+image = "test\\194_23925.jpg"
 
 # Needed to find random images and map Class IDs to Names (e.g. 1 -> "Artery")
 annotation_file = "test/annotation_coco.json"
@@ -16,11 +16,15 @@ annotation_file = "test/annotation_coco.json"
 # Detector (Finds the organs)
 det_ckpt = "runs/detector_tuned_r50_highres_11/detector_best.pth"
 det_meta = "runs/detector_tuned_r50_highres_11/meta.json"
+#det_ckpt = "runs/detector_baseline_5/detector_best.pth"
+#det_meta = "runs/detector_baseline_5/meta.json"
 det_thr = 0.65
 
 # CVS Model (Grades the safety)
 cvs_ckpt = "runs/cvs_tuned_r50_temporal_bi_10/hidden_64/cvs_tuned_best.pth"
 cvs_meta = "runs/cvs_tuned_r50_temporal_bi_10/hidden_64/meta.json"
+#cvs_ckpt = "runs/cvs_baseline_3/cvs_best.pth"
+#cvs_meta = "runs/cvs_baseline_3/meta.json"
 cvs_thr = 0.7
 
 # --- Output ---
